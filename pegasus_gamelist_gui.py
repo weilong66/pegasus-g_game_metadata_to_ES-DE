@@ -17,6 +17,12 @@ try:
 except ImportError:
     HAS_PINYIN = False
 
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, 'pegasus_gamelist_config.json')
@@ -137,24 +143,50 @@ def _get_asset_extension(asset_path, default='.png'):
     return default
 
 
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp'}
+UNIFIED_IMAGE_EXT = '.png'
+
+
+def _convert_image_to_png(src_path, dest_path, log_func=None):
+    if not HAS_PIL:
+        shutil.copy2(src_path, dest_path)
+        return True
+
+    _, src_ext = os.path.splitext(src_path)
+    if src_ext.lower() == '.png':
+        shutil.copy2(src_path, dest_path)
+        return True
+
+    try:
+        with Image.open(src_path) as img:
+            if img.mode in ('RGBA', 'LA', 'P'):
+                img = img.convert('RGBA')
+            elif img.mode not in ('RGB',):
+                img = img.convert('RGB')
+            img.save(dest_path, 'PNG')
+        if log_func:
+            log_func(f"    格式转换: {src_ext} -> .png")
+        return True
+    except Exception as e:
+        if log_func:
+            log_func(f"    转换失败，直接复制: {str(e)}")
+        shutil.copy2(src_path, dest_path)
+        return False
+
+
 def _build_asset_paths(game):
     game_name = game.get('game', '')
 
-    box_front_path = game.get('assets_box_front', '')
-    logo_path = game.get('assets_logo', '')
     video_path = game.get('assets_video', '')
-
-    cover_ext = _get_asset_extension(box_front_path, '.png')
-    marquee_ext = _get_asset_extension(logo_path, '.png')
     video_ext = _get_asset_extension(video_path, '.mp4')
 
     base = './assets'
     return {
-        'thumbnail': f'{base}/covers/{game_name}{cover_ext}',
-        'marquee': f'{base}/marquees/{game_name}{marquee_ext}',
+        'thumbnail': f'{base}/covers/{game_name}{UNIFIED_IMAGE_EXT}',
+        'marquee': f'{base}/marquees/{game_name}{UNIFIED_IMAGE_EXT}',
         'video': f'{base}/videos/{game_name}{video_ext}',
-        'screenshot': f'{base}/screenshots/{game_name}.png',
-        'image': f'{base}/covers/{game_name}{cover_ext}',
+        'screenshot': f'{base}/screenshots/{game_name}{UNIFIED_IMAGE_EXT}',
+        'image': f'{base}/covers/{game_name}{UNIFIED_IMAGE_EXT}',
     }
 
 
@@ -277,27 +309,28 @@ def process_media_folder(media_dir, output_base, game_name, log_func=None):
                 continue
             name_without_ext, ext = os.path.splitext(filename)
             name_lower = name_without_ext.lower()
+            ext_lower = ext.lower()
 
             if name_lower == 'boxfront':
-                dest_path = os.path.join(covers_dir, f"{subfolder_name}{ext}")
+                dest_path = os.path.join(covers_dir, f"{subfolder_name}{UNIFIED_IMAGE_EXT}")
                 counter = 1
                 while os.path.exists(dest_path):
-                    dest_path = os.path.join(covers_dir, f"{subfolder_name}_{counter}{ext}")
+                    dest_path = os.path.join(covers_dir, f"{subfolder_name}_{counter}{UNIFIED_IMAGE_EXT}")
                     counter += 1
-                shutil.copy2(file_path, dest_path)
+                _convert_image_to_png(file_path, dest_path, log_func=log_func)
                 if log_func:
-                    log_func(f"    boxFront -> assets/covers/{subfolder_name}{ext}")
+                    log_func(f"    boxFront -> assets/covers/{subfolder_name}{UNIFIED_IMAGE_EXT}")
                 counts['covers'] += 1
 
             elif name_lower == 'logo':
-                dest_path = os.path.join(marquees_dir, f"{subfolder_name}{ext}")
+                dest_path = os.path.join(marquees_dir, f"{subfolder_name}{UNIFIED_IMAGE_EXT}")
                 counter = 1
                 while os.path.exists(dest_path):
-                    dest_path = os.path.join(marquees_dir, f"{subfolder_name}_{counter}{ext}")
+                    dest_path = os.path.join(marquees_dir, f"{subfolder_name}_{counter}{UNIFIED_IMAGE_EXT}")
                     counter += 1
-                shutil.copy2(file_path, dest_path)
+                _convert_image_to_png(file_path, dest_path, log_func=log_func)
                 if log_func:
-                    log_func(f"    logo -> assets/marquees/{subfolder_name}{ext}")
+                    log_func(f"    logo -> assets/marquees/{subfolder_name}{UNIFIED_IMAGE_EXT}")
                 counts['marquees'] += 1
 
             elif name_lower == 'video':
@@ -600,6 +633,12 @@ class PegasusConverterApp:
                                     text="警告: 未安装pypinyin，名称前缀功能不可用。请运行: pip install pypinyin",
                                     foreground='red')
             pinyin_warn.grid(row=2, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
+
+        if not HAS_PIL:
+            pil_warn = ttk.Label(ffmpeg_frame,
+                                 text="警告: 未安装Pillow，图片格式转换不可用。请运行: pip install Pillow",
+                                 foreground='red')
+            pil_warn.grid(row=3, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
 
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, **pad)
