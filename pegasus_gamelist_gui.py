@@ -722,7 +722,7 @@ class PegasusConverterApp:
         if custom_out:
             self._log(f"输出目录: {custom_out}")
         else:
-            self._log(f"输出目录: {os.path.join(BASE_DIR, config.get('output_folder', 'output'))}")
+            self._log(f"输出目录: {os.path.join(BASE_DIR, 'output')}")
         self._log("=" * 50)
 
         thread = threading.Thread(target=self._run_processing, args=(config,), daemon=True)
