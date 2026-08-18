@@ -411,7 +411,6 @@ def extract_video_frame(video_path, output_image_path, ffmpeg_path, frame_time_s
 def process_all(config, log_func=None):
     source_dir = config.get('source_dir', '')
     custom_output_dir = config.get('output_dir', '').strip()
-    output_folder_name = config.get('output_folder', 'output')
     do_metadata = config.get('do_metadata', True)
     do_media = config.get('do_media', True)
     do_screenshots = config.get('do_screenshots', False)
@@ -423,7 +422,7 @@ def process_all(config, log_func=None):
     if custom_output_dir:
         output_dir = custom_output_dir
     else:
-        output_dir = os.path.join(BASE_DIR, output_folder_name)
+        output_dir = os.path.join(BASE_DIR, 'output')
     os.makedirs(output_dir, exist_ok=True)
 
     if not os.path.isdir(source_dir):
@@ -556,13 +555,8 @@ class PegasusConverterApp:
             row=0, column=1, padx=5, pady=5, sticky=tk.EW)
         ttk.Button(output_frame, text="浏览...", command=self._browse_output).grid(
             row=0, column=2, padx=5, pady=5)
-
-        ttk.Label(output_frame, text="输出文件夹名:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        self.output_folder_var = tk.StringVar(value="output")
-        ttk.Entry(output_frame, textvariable=self.output_folder_var, width=30).grid(
-            row=1, column=1, padx=5, pady=5, sticky=tk.W)
-        ttk.Label(output_frame, text="(未设置输出目录时，保存到脚本目录下此文件夹)", foreground='gray').grid(
-            row=1, column=2, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(output_frame, text="(留空则输出到脚本目录下的 output 文件夹)", foreground='gray').grid(
+            row=1, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
 
         options_frame = ttk.LabelFrame(main_frame, text="处理选项")
         options_frame.pack(fill=tk.X, **pad)
@@ -663,7 +657,6 @@ class PegasusConverterApp:
         return {
             'source_dir': self.source_dir_var.get().strip(),
             'output_dir': self.output_dir_var.get().strip(),
-            'output_folder': self.output_folder_var.get().strip() or 'output',
             'do_metadata': self.do_metadata_var.get(),
             'do_media': self.do_media_var.get(),
             'do_screenshots': self.do_screenshots_var.get(),
@@ -691,7 +684,6 @@ class PegasusConverterApp:
                 config = json.load(f)
             self.source_dir_var.set(config.get('source_dir', ''))
             self.output_dir_var.set(config.get('output_dir', ''))
-            self.output_folder_var.set(config.get('output_folder', 'output'))
             self.do_metadata_var.set(config.get('do_metadata', True))
             self.do_media_var.set(config.get('do_media', True))
             self.do_screenshots_var.set(config.get('do_screenshots', False))
