@@ -1,6 +1,8 @@
 import os
 import sys
 import json
+import uuid
+import time
 import shutil
 import subprocess
 import threading
@@ -77,15 +79,26 @@ def parse_metadata(file_path):
         return []
 
     current_game = None
+    in_files_section = False
+
     for line in lines:
-        line = line.strip()
-        if not line or line.startswith('#'):
+        line_stripped = line.strip()
+        if not line_stripped or line_stripped.startswith('#'):
             continue
-        if ':' not in line:
+
+        if in_files_section and ':' not in line_stripped:
+            if line_stripped and current_game is not None:
+                current_game.setdefault('files', []).append(line_stripped)
             continue
-        key, value = line.split(':', 1)
+
+        if ':' not in line_stripped:
+            continue
+
+        key, value = line_stripped.split(':', 1)
         key = key.strip().lower()
         value = value.strip()
+
+        in_files_section = False
 
         if key == 'game':
             if current_game:
@@ -93,12 +106,22 @@ def parse_metadata(file_path):
             current_game = {'game': value}
         elif key == 'file' and current_game is not None:
             current_game['file'] = value
+        elif key == 'files' and current_game is not None:
+            if value:
+                current_game.setdefault('files', []).append(value)
+            in_files_section = True
         elif key == 'description' and current_game is not None:
             current_game['description'] = value
         elif key == 'developer' and current_game is not None:
             current_game['developer'] = value
         elif key == 'sort-by' and current_game is not None:
             current_game['sort-by'] = value
+        elif key == 'assets.box_front' and current_game is not None:
+            current_game['assets_box_front'] = value
+        elif key == 'assets.logo' and current_game is not None:
+            current_game['assets_logo'] = value
+        elif key == 'assets.video' and current_game is not None:
+            current_game['assets_video'] = value
 
     if current_game:
         games.append(current_game)
@@ -106,27 +129,98 @@ def parse_metadata(file_path):
     return games
 
 
+def _get_asset_extension(asset_path, default='.png'):
+    if asset_path:
+        _, ext = os.path.splitext(asset_path)
+        if ext:
+            return ext
+    return default
+
+
+def _build_asset_paths(game):
+    game_name = game.get('game', '')
+
+    box_front_path = game.get('assets_box_front', '')
+    logo_path = game.get('assets_logo', '')
+    video_path = game.get('assets_video', '')
+
+    cover_ext = _get_asset_extension(box_front_path, '.png')
+    marquee_ext = _get_asset_extension(logo_path, '.png')
+    video_ext = _get_asset_extension(video_path, '.mp4')
+
+    base = './assets'
+    return {
+        'thumbnail': f'{base}/covers/{game_name}{cover_ext}',
+        'marquee': f'{base}/marquees/{game_name}{marquee_ext}',
+        'video': f'{base}/videos/{game_name}{video_ext}',
+        'screenshot': f'{base}/screenshots/{game_name}.png',
+        'image': f'{base}/covers/{game_name}{cover_ext}',
+    }
+
+
 def create_gamelist_xml(games, output_path, name_prefix=True):
+    games_sorted = sorted(games, key=lambda g: g.get('sort-by', ''))
+
     root = ET.Element("gameList")
-    for game in games:
-        game_elem = ET.SubElement(root, "game")
-        file_val = game.get('file', '')
-        path_elem = ET.SubElement(game_elem, "path")
-        path_elem.text = "./" + file_val if file_val else "./"
+    generated_count = 0
 
-        name_val = game.get('game', '')
-        if name_prefix:
-            name_val = get_prefixed_name(name_val)
-        name_elem = ET.SubElement(game_elem, "name")
-        name_elem.text = name_val
+    for game in games_sorted:
+        game_name = game.get('game', '')
 
-        desc_elem = ET.SubElement(game_elem, "desc")
-        desc_elem.text = game.get('description', '')
+        files = game.get('files', [])
+        if not files:
+            file_val = game.get('file', '')
+            if file_val:
+                files = [file_val]
+            else:
+                files = ['']
 
-        playcount_elem = ET.SubElement(game_elem, "playcount")
-        playcount_elem.text = "1"
+        assets = _build_asset_paths(game)
 
-        ET.SubElement(game_elem, "lastplayed")
+        for file_val in files:
+            game_elem = ET.SubElement(root, "game")
+
+            path_elem = ET.SubElement(game_elem, "path")
+            path_elem.text = "./" + file_val if file_val else "./"
+
+            if len(files) > 1:
+                name_val = os.path.splitext(os.path.basename(file_val))[0]
+            else:
+                name_val = game_name
+            if name_prefix:
+                name_val = get_prefixed_name(name_val)
+            name_elem = ET.SubElement(game_elem, "name")
+            name_elem.text = name_val
+
+            desc_elem = ET.SubElement(game_elem, "desc")
+            desc_elem.text = game.get('description', '')
+
+            thumbnail_elem = ET.SubElement(game_elem, "thumbnail")
+            thumbnail_elem.text = assets['thumbnail']
+
+            video_elem = ET.SubElement(game_elem, "video")
+            video_elem.text = assets['video']
+
+            screenshot_elem = ET.SubElement(game_elem, "screenshot")
+            screenshot_elem.text = assets['screenshot']
+
+            image_elem = ET.SubElement(game_elem, "image")
+            image_elem.text = assets['image']
+
+            players_elem = ET.SubElement(game_elem, "players")
+            players_elem.text = "null"
+
+            id_elem = ET.SubElement(game_elem, "id")
+            id_elem.text = str(uuid.uuid4())
+
+            marquee_elem = ET.SubElement(game_elem, "marquee")
+            marquee_elem.text = assets['marquee']
+
+            scrap_elem = ET.SubElement(game_elem, "scrap")
+            scrap_elem.set('name', 'RomM')
+            scrap_elem.set('date', time.strftime('%Y%m%dT%H%M%S'))
+
+            generated_count += 1
 
     rough_str = ET.tostring(root, encoding='utf-8', method='xml')
     parsed = minidom.parseString(rough_str)
@@ -135,11 +229,11 @@ def create_gamelist_xml(games, output_path, name_prefix=True):
 
     xml_str = xml_str.replace('<?xml version="1.0" encoding="utf-8"?>',
                               "<?xml version='1.0' encoding='utf-8'?>")
-    xml_str = xml_str.replace('<lastplayed/>', '<lastplayed />')
-    xml_str = xml_str.replace('<playcount>1</playcount>', '<playcount>1</playcount>')
 
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(xml_str)
+
+    return generated_count
 
 
 def find_metadata_files(source_dir, recursive=True):
@@ -156,9 +250,10 @@ def find_metadata_files(source_dir, recursive=True):
 
 
 def process_media_folder(media_dir, output_base, game_name, log_func=None):
-    covers_dir = os.path.join(output_base, 'covers')
-    marquees_dir = os.path.join(output_base, 'marquees')
-    videos_dir = os.path.join(output_base, 'videos')
+    assets_dir = os.path.join(output_base, 'assets')
+    covers_dir = os.path.join(assets_dir, 'covers')
+    marquees_dir = os.path.join(assets_dir, 'marquees')
+    videos_dir = os.path.join(assets_dir, 'videos')
     os.makedirs(covers_dir, exist_ok=True)
     os.makedirs(marquees_dir, exist_ok=True)
     os.makedirs(videos_dir, exist_ok=True)
@@ -191,7 +286,7 @@ def process_media_folder(media_dir, output_base, game_name, log_func=None):
                     counter += 1
                 shutil.copy2(file_path, dest_path)
                 if log_func:
-                    log_func(f"    boxFront -> covers/{subfolder_name}{ext}")
+                    log_func(f"    boxFront -> assets/covers/{subfolder_name}{ext}")
                 counts['covers'] += 1
 
             elif name_lower == 'logo':
@@ -202,7 +297,7 @@ def process_media_folder(media_dir, output_base, game_name, log_func=None):
                     counter += 1
                 shutil.copy2(file_path, dest_path)
                 if log_func:
-                    log_func(f"    logo -> marquees/{subfolder_name}{ext}")
+                    log_func(f"    logo -> assets/marquees/{subfolder_name}{ext}")
                 counts['marquees'] += 1
 
             elif name_lower == 'video':
@@ -213,7 +308,7 @@ def process_media_folder(media_dir, output_base, game_name, log_func=None):
                     counter += 1
                 shutil.copy2(file_path, dest_path)
                 if log_func:
-                    log_func(f"    video -> videos/{subfolder_name}{ext}")
+                    log_func(f"    video -> assets/videos/{subfolder_name}{ext}")
                 counts['videos'] += 1
 
     return counts
@@ -367,10 +462,10 @@ def process_all(config, log_func=None):
 
             if games:
                 xml_path = os.path.join(target_dir, 'gamelist.xml')
-                create_gamelist_xml(games, xml_path, name_prefix=add_prefix)
+                generated = create_gamelist_xml(games, xml_path, name_prefix=add_prefix)
                 if log_func:
-                    log_func(f"  已生成 gamelist.xml")
-                total_stats['games'] += len(games)
+                    log_func(f"  已生成 gamelist.xml ({generated} 个游戏元素)")
+                total_stats['games'] += generated
 
         if do_media:
             media_dir = os.path.join(meta_dir, 'media')
@@ -390,7 +485,7 @@ def process_all(config, log_func=None):
 
         if do_screenshots:
             media_dir = os.path.join(meta_dir, 'media')
-            screenshots_dir = os.path.join(target_dir, 'screenshots')
+            screenshots_dir = os.path.join(target_dir, 'assets', 'screenshots')
             os.makedirs(screenshots_dir, exist_ok=True)
 
             if os.path.isdir(media_dir):
