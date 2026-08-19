@@ -281,7 +281,7 @@ def find_metadata_files(source_dir, recursive=True):
     return results
 
 
-def process_media_folder(media_dir, output_base, game_name, log_func=None):
+def process_media_folder(media_dir, output_base, file_to_game, log_func=None):
     assets_dir = os.path.join(output_base, 'assets')
     covers_dir = os.path.join(assets_dir, 'covers')
     marquees_dir = os.path.join(assets_dir, 'marquees')
@@ -300,8 +300,9 @@ def process_media_folder(media_dir, output_base, game_name, log_func=None):
         if not os.path.isdir(item_path):
             continue
         subfolder_name = item
+        target_name = file_to_game.get(subfolder_name, subfolder_name)
         if log_func:
-            log_func(f"  处理媒体子文件夹: {subfolder_name}")
+            log_func(f"  处理媒体子文件夹: {subfolder_name} -> {target_name}")
 
         for filename in os.listdir(item_path):
             file_path = os.path.join(item_path, filename)
@@ -312,36 +313,36 @@ def process_media_folder(media_dir, output_base, game_name, log_func=None):
             ext_lower = ext.lower()
 
             if name_lower == 'boxfront':
-                dest_path = os.path.join(covers_dir, f"{subfolder_name}{UNIFIED_IMAGE_EXT}")
+                dest_path = os.path.join(covers_dir, f"{target_name}{UNIFIED_IMAGE_EXT}")
                 counter = 1
                 while os.path.exists(dest_path):
-                    dest_path = os.path.join(covers_dir, f"{subfolder_name}_{counter}{UNIFIED_IMAGE_EXT}")
+                    dest_path = os.path.join(covers_dir, f"{target_name}_{counter}{UNIFIED_IMAGE_EXT}")
                     counter += 1
                 _convert_image_to_png(file_path, dest_path, log_func=log_func)
                 if log_func:
-                    log_func(f"    boxFront -> assets/covers/{subfolder_name}{UNIFIED_IMAGE_EXT}")
+                    log_func(f"    boxFront -> assets/covers/{target_name}{UNIFIED_IMAGE_EXT}")
                 counts['covers'] += 1
 
             elif name_lower == 'logo':
-                dest_path = os.path.join(marquees_dir, f"{subfolder_name}{UNIFIED_IMAGE_EXT}")
+                dest_path = os.path.join(marquees_dir, f"{target_name}{UNIFIED_IMAGE_EXT}")
                 counter = 1
                 while os.path.exists(dest_path):
-                    dest_path = os.path.join(marquees_dir, f"{subfolder_name}_{counter}{UNIFIED_IMAGE_EXT}")
+                    dest_path = os.path.join(marquees_dir, f"{target_name}_{counter}{UNIFIED_IMAGE_EXT}")
                     counter += 1
                 _convert_image_to_png(file_path, dest_path, log_func=log_func)
                 if log_func:
-                    log_func(f"    logo -> assets/marquees/{subfolder_name}{UNIFIED_IMAGE_EXT}")
+                    log_func(f"    logo -> assets/marquees/{target_name}{UNIFIED_IMAGE_EXT}")
                 counts['marquees'] += 1
 
             elif name_lower == 'video':
-                dest_path = os.path.join(videos_dir, f"{subfolder_name}{ext}")
+                dest_path = os.path.join(videos_dir, f"{target_name}{ext}")
                 counter = 1
                 while os.path.exists(dest_path):
-                    dest_path = os.path.join(videos_dir, f"{subfolder_name}_{counter}{ext}")
+                    dest_path = os.path.join(videos_dir, f"{target_name}_{counter}{ext}")
                     counter += 1
                 shutil.copy2(file_path, dest_path)
                 if log_func:
-                    log_func(f"    video -> assets/videos/{subfolder_name}{ext}")
+                    log_func(f"    video -> assets/videos/{target_name}{ext}")
                 counts['videos'] += 1
 
     return counts
@@ -495,12 +496,26 @@ def process_all(config, log_func=None):
             log_func(f"处理: {folder_name}")
             log_func(f"{'='*50}")
 
+        games = []
+        file_to_game = {}
+
         if do_metadata:
             if log_func:
                 log_func(f"  解析 metadata.pegasus.txt ...")
             games = parse_metadata(meta_path)
             if log_func:
                 log_func(f"  找到 {len(games)} 个游戏条目")
+
+            for g in games:
+                game_name = g.get('game', '')
+                file_val = g.get('file', '')
+                if file_val:
+                    file_base = os.path.splitext(os.path.basename(file_val))[0]
+                    file_to_game[file_base] = game_name
+                for f in g.get('files', []):
+                    if f:
+                        file_base = os.path.splitext(os.path.basename(f))[0]
+                        file_to_game[file_base] = game_name
 
             if games:
                 xml_path = os.path.join(target_dir, 'gamelist.xml')
@@ -515,7 +530,7 @@ def process_all(config, log_func=None):
                 if log_func:
                     log_func(f"  处理媒体文件...")
                 media_base = target_dir
-                counts = process_media_folder(media_dir, media_base, folder_name, log_func=log_func)
+                counts = process_media_folder(media_dir, media_base, file_to_game, log_func=log_func)
                 total_stats['covers'] += counts['covers']
                 total_stats['marquees'] += counts['marquees']
                 total_stats['videos'] += counts['videos']
@@ -537,12 +552,13 @@ def process_all(config, log_func=None):
                     subfolder_path = os.path.join(media_dir, subfolder)
                     if not os.path.isdir(subfolder_path):
                         continue
+                    target_name = file_to_game.get(subfolder, subfolder)
                     for fname in os.listdir(subfolder_path):
                         if fname.lower() == 'video.mp4' or fname.lower().startswith('video'):
                             video_path = os.path.join(subfolder_path, fname)
                             if not os.path.isfile(video_path):
                                 continue
-                            out_img = os.path.join(screenshots_dir, f"{subfolder}.png")
+                            out_img = os.path.join(screenshots_dir, f"{target_name}.png")
                             if extract_video_frame(video_path, out_img, ffmpeg_path, frame_time, log_func=log_func):
                                 total_stats['screenshots'] += 1
             else:
