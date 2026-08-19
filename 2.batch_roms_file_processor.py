@@ -96,8 +96,22 @@ def collect_files_recursive(directory):
     return files
 
 
-def process_file(file_path, target_dir, force_overwrite=False, log_func=None):
+def process_file(file_path, target_dir, force_overwrite=False, copy_archives_directly=False, log_func=None):
     file_name = Path(file_path).name
+
+    if copy_archives_directly:
+        dest_path = os.path.join(target_dir, file_name)
+        if os.path.exists(dest_path) and not force_overwrite:
+            if log_func:
+                log_func(f"  跳过: {file_name} (目标已存在)")
+            return False
+        if os.path.exists(dest_path) and force_overwrite:
+            if log_func:
+                log_func(f"  覆盖: {file_name}")
+        shutil.copy2(file_path, dest_path)
+        if log_func:
+            log_func(f"  复制: {file_name}")
+        return True
 
     if not is_archive(file_path):
         dest_path = os.path.join(target_dir, file_name)
@@ -184,7 +198,7 @@ def process_file(file_path, target_dir, force_overwrite=False, log_func=None):
     return True
 
 
-def batch_process(source_dir, target_dir, force_overwrite=False, log_func=None):
+def batch_process(source_dir, target_dir, force_overwrite=False, copy_archives_directly=False, log_func=None):
     source_path = Path(source_dir)
     if not source_path.is_dir():
         if log_func:
@@ -214,7 +228,8 @@ def batch_process(source_dir, target_dir, force_overwrite=False, log_func=None):
         if log_func:
             log_func(f"\n[{i}/{len(files)}] 处理: {file_path.name}")
         try:
-            result = process_file(str(file_path), target_dir, force_overwrite=force_overwrite, log_func=log_func)
+            result = process_file(str(file_path), target_dir, force_overwrite=force_overwrite,
+                                       copy_archives_directly=copy_archives_directly, log_func=log_func)
             if result is True:
                 success_count += 1
             elif result is False:
@@ -275,6 +290,11 @@ class BatchProcessorApp:
         ttk.Checkbutton(options_frame, text="强制覆盖已存在的文件（不勾选时跳过）",
                         variable=self.force_overwrite_var).grid(
             row=0, column=0, sticky=tk.W, padx=5, pady=5)
+
+        self.copy_archives_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options_frame, text="直接复制压缩文件（不解压，保留原始压缩包）",
+                        variable=self.copy_archives_var).grid(
+            row=1, column=0, sticky=tk.W, padx=5, pady=5)
 
         info_frame = ttk.LabelFrame(main_frame, text="支持的格式")
         info_frame.pack(fill=tk.X, **pad)
@@ -338,6 +358,7 @@ class BatchProcessorApp:
             'source_dir': self.source_dir_var.get().strip(),
             'target_dir': self.target_dir_var.get().strip(),
             'force_overwrite': self.force_overwrite_var.get(),
+            'copy_archives_directly': self.copy_archives_var.get(),
         }
 
     def _save_config(self):
@@ -360,6 +381,7 @@ class BatchProcessorApp:
             self.source_dir_var.set(config.get('source_dir', ''))
             self.target_dir_var.set(config.get('target_dir', ''))
             self.force_overwrite_var.set(config.get('force_overwrite', False))
+            self.copy_archives_var.set(config.get('copy_archives_directly', False))
             self._log(f"配置已加载: {CONFIG_FILE}")
         except Exception as e:
             self._log(f"加载配置失败: {str(e)}")
@@ -368,6 +390,7 @@ class BatchProcessorApp:
         source_dir = self.source_dir_var.get().strip()
         target_dir = self.target_dir_var.get().strip()
         force_overwrite = self.force_overwrite_var.get()
+        copy_archives_directly = self.copy_archives_var.get()
 
         if not source_dir:
             messagebox.showwarning("警告", "请选择源目录！")
@@ -387,15 +410,20 @@ class BatchProcessorApp:
             self._log("强制覆盖: 开启")
         else:
             self._log("强制覆盖: 关闭（跳过已存在的文件）")
+        if copy_archives_directly:
+            self._log("压缩文件处理: 直接复制（不解压）")
+        else:
+            self._log("压缩文件处理: 解压并处理")
         self._log("=" * 50)
 
         thread = threading.Thread(target=self._run_processing,
-                                  args=(source_dir, target_dir, force_overwrite), daemon=True)
+                                  args=(source_dir, target_dir, force_overwrite, copy_archives_directly), daemon=True)
         thread.start()
 
-    def _run_processing(self, source_dir, target_dir, force_overwrite):
+    def _run_processing(self, source_dir, target_dir, force_overwrite, copy_archives_directly):
         try:
-            batch_process(source_dir, target_dir, force_overwrite=force_overwrite, log_func=self._log)
+            batch_process(source_dir, target_dir, force_overwrite=force_overwrite,
+                          copy_archives_directly=copy_archives_directly, log_func=self._log)
         except Exception as e:
             self._log(f"\n处理异常: {str(e)}")
             import traceback
