@@ -1,12 +1,28 @@
 # 天马G游戏列表转换工具集
 
-本工具集包含两个 Python GUI 脚本，用于将 Pegasus-G (天马G) 整合包中的ROM资源及相关元数据转换为 ES-DE 可用的格式，以便为 [RomM](https://docs.romm.app/latest/getting-started/metadata-providers/#es-de-gamelistxml) 提供游戏元数据。
+本工具集包含三个 Python GUI 脚本，用于将 Pegasus-G (天马G) 整合包中的ROM资源及相关元数据转换为 ES-DE 可用的格式，以便为 [RomM](https://docs.romm.app/latest/getting-started/metadata-providers/#es-de-gamelistxml) 提供游戏元数据。
 
 ---
 
-## 脚本 1：Pegasus Metadata 转换器 (`1.pegasus_gamelist_gui.py`)
+## 文件列表
 
-将 Pegasus-G 整合包里的 `metadata.pegasus.txt` 和相应多媒体文件（封面、截图、视频等）批量转换为 ES-DE 可用的 `gamelist.xml` 格式。
+| 文件名                                                       | 说明                          |
+| ------------------------------------------------------------ | ----------------------------- |
+| [1.pegasus_gamelist_gui.py](##脚本 1：Pegasus Metadata 转换器) | Pegasus Metadata 转换器主脚本 |
+| [2.romm_gamelist_gui.py](##脚本 2：Roms批量文件处理器)       | 批量文件处理器主脚本          |
+| [3.update_gamelist_paths.py](##脚本 3：gamelist.xml 路径更新器) | gamelist.xml 路径更新器主脚本 |
+| `pegasus_gamelist_config.json`                               | 脚本1的配置文件               |
+| `batch_processor_config.json`                                | 脚本2的配置文件               |
+| `update_paths_config.json`                                   | 脚本3的配置文件               |
+
+
+
+
+---
+
+## 脚本 1：Pegasus Metadata 转换器
+
+ (`1.pegasus_gamelist_gui.py`) 将 Pegasus-G 整合包里的 `metadata.pegasus.txt` 和相应多媒体文件（封面、截图、视频等）批量转换为 ES-DE 可用的 `gamelist.xml` 格式。
 
 ### 功能
 
@@ -99,9 +115,10 @@ GUI 设置可以手动保存到 `pegasus_gamelist_config.json`。
 
 ---
 
-## 脚本 2：Roms批量文件处理器 (`2.batch_roms_file_processor.py`)
+## 脚本 2：Roms批量文件处理器
 
-用于批量处理指定目录下的Roms压缩文件，支持压缩包自动解压、重命名，然后拷贝到目标文件夹中。
+(`2.batch_roms_file_processor.py`) 用于批量处理指定目录下的Roms压缩文件，支持压缩包自动解压、重命名，然后拷贝到目标文件夹中。
+
 
 ### 功能
 
@@ -143,11 +160,48 @@ GUI 设置可以手动保存到 `batch_processor_config.json`。
 
 ---
 
-## 文件列表
+## 脚本 3：gamelist.xml 路径更新器
 
-| 文件名 | 说明 |
-|--------|------|
-| `1.pegasus_gamelist_gui.py` | Pegasus Metadata 转换器主脚本 |
-| `2.batch_roms_file_processor.py` | 批量文件处理器主脚本 |
-| `pegasus_gamelist_config.json` | 脚本1的配置文件 |
-| `batch_processor_config.json` | 脚本2的配置文件 |
+(`3.update_gamelist_paths.py`) 根据实际解压/拷贝后的文件扩展名，更新 `gamelist.xml` 中的 `<path>` 元素。
+> 天马G整合包中的ROM文件大多为压缩包，RomM 无法直接加载压缩包里的 ROM 文件，需解压后才能正常使用。但压缩包内的 ROM 文件名与元数据中的文件名往往不同，后缀也不统一（如元数据中记录的是 `.md`，实际解压出来的可能是 `.smd`）。本脚本通过扫描实际文件目录，自动将 `gamelist.xml` 中的路径更新为正确的扩展名。
+
+### 功能
+
+- **自动匹配**：扫描目标目录中的实际文件，按文件名基准名（stem）匹配并更新 `gamelist.xml` 中的路径
+- **智能选择**：同一基准名有多个文件时（如同时存在 `.md` 和 `.smd`），优先选择非 `.md` 扩展名（特别是 `.smd`）
+- **子文件夹支持**：当路径对应子文件夹时，自动更新为 `./文件夹名/` 格式
+- **路径容错**：gamelist 路径支持手动输入目录（自动查找 `gamelist.xml`），输出路径支持目录（自动保存为 `gamelist.xml`）
+- **GUI 界面**：可视化操作，支持配置保存/加载
+
+### 依赖
+
+- Python 3.8+
+
+### 使用
+
+```bash
+python 3.update_gamelist_paths.py
+```
+
+### 操作步骤
+
+1. 选择 **gamelist.xml** 文件（或手动输入包含 `gamelist.xml` 的目录）
+2. 选择 **实际文件目录**（存放解压/拷贝后游戏文件的目录）
+3. 选择 **输出设置**：
+   - 勾选 **覆盖原 gamelist.xml**：直接覆盖原文件
+   - 取消勾选：另存为新文件（支持手动输入目录，将自动保存为 `gamelist.xml`）
+4. 点击 **开始更新**
+
+### 匹配逻辑说明
+
+| 场景 | 处理方式 |
+|------|----------|
+| 单文件匹配 | 直接使用该文件名更新路径 |
+| 多文件匹配（如 `.md` + `.smd`） | 优先选择非 `.md` 扩展名，特别是 `.smd` |
+| 子文件夹匹配 | 更新为 `./文件夹名/` 格式 |
+| 未找到匹配 | 保持原路径不变，日志中提示 |
+
+### 配置文件
+
+GUI 设置可以手动保存到 `update_paths_config.json`。
+
