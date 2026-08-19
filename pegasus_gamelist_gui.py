@@ -239,17 +239,17 @@ def create_gamelist_xml(games, output_path, name_prefix=True):
             image_elem = ET.SubElement(game_elem, "image")
             image_elem.text = assets['image']
 
+            marquee_elem = ET.SubElement(game_elem, "marquee")
+            marquee_elem.text = assets['marquee']
+
             players_elem = ET.SubElement(game_elem, "players")
-            players_elem.text = "null"
+            players_elem.text = "1"
 
             id_elem = ET.SubElement(game_elem, "id")
             id_elem.text = str(uuid.uuid4())
 
-            marquee_elem = ET.SubElement(game_elem, "marquee")
-            marquee_elem.text = assets['marquee']
-
             scrap_elem = ET.SubElement(game_elem, "scrap")
-            scrap_elem.set('name', 'RomM')
+            scrap_elem.set('name', 'PegasusG')
             scrap_elem.set('date', time.strftime('%Y%m%dT%H%M%S'))
 
             generated_count += 1
