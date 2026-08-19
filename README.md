@@ -2,14 +2,16 @@
 
 本 Python GUI 脚本用于将 Pegasus-G (天马G) 整合包中的ROM资源及相关元数据转换为 [RomM](https://docs.romm.app/latest/getting-started/metadata-providers/#es-de-gamelistxml) 可用的 ES-DE 格式的元数据。
 
+> 脚本完全使用 AI 编写，只保证能用，不保证质量。
+
 ---
 
 ## 脚本列表
 
 | 文件 | 说明 |
 |------|------|
-| [pegasus-g_gamelist_processor_gui.py](##主脚本：pegasus-g_gamelist_processor_gui.py) | 转换主处理脚本（一体化GUI） |
-| [smart_screenshot.py](##智能截图模块：smart_screenshot.py) | 智能截图模块（检测纯色帧自动延后） |
+| [pegasus-g_gamelist_processor_gui.py](#主脚本pegasus-g_gamelist_processor_guipy) | 转换主处理脚本（一体化GUI） |
+| [smart_screenshot.py](#智能截图模块smart_screenshotpy) | 智能截图模块（检测纯色帧自动延后） |
 
 ---
 
