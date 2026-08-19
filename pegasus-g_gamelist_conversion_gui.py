@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, 'integrated_processor_config.json')
+CONFIG_FILE = os.path.join(BASE_DIR, 'pegasus_conversion_gui_config.json')
 
 try:
     from pypinyin import pinyin, Style
@@ -446,7 +446,7 @@ def find_metadata_files(source_dir, recursive=True):
     return results
 
 
-def process_media_folder(media_dir, output_base, file_to_game, log_func=None):
+def process_media_folder(media_dir, output_base, file_to_game, force_overwrite=False, log_func=None):
     assets_dir = os.path.join(output_base, 'assets')
     covers_dir = os.path.join(assets_dir, 'covers')
     marquees_dir = os.path.join(assets_dir, 'marquees')
@@ -478,33 +478,48 @@ def process_media_folder(media_dir, output_base, file_to_game, log_func=None):
 
             if name_lower == 'boxfront':
                 dest_path = os.path.join(covers_dir, f"{target_name}{UNIFIED_IMAGE_EXT}")
-                counter = 1
-                while os.path.exists(dest_path):
-                    dest_path = os.path.join(covers_dir, f"{target_name}_{counter}{UNIFIED_IMAGE_EXT}")
-                    counter += 1
-                _convert_image_to_png(file_path, dest_path, log_func=log_func)
+                if force_overwrite:
+                    if log_func:
+                        log_func(f"    覆盖: {dest_path}")
+                    _convert_image_to_png(file_path, dest_path, log_func=log_func)
+                else:
+                    if os.path.exists(dest_path):
+                        if log_func:
+                            log_func(f"    跳过: {target_name}{UNIFIED_IMAGE_EXT} (已存在)")
+                        continue
+                    _convert_image_to_png(file_path, dest_path, log_func=log_func)
                 if log_func:
                     log_func(f"    boxFront -> assets/covers/{target_name}{UNIFIED_IMAGE_EXT}")
                 counts['covers'] += 1
 
             elif name_lower == 'logo':
                 dest_path = os.path.join(marquees_dir, f"{target_name}{UNIFIED_IMAGE_EXT}")
-                counter = 1
-                while os.path.exists(dest_path):
-                    dest_path = os.path.join(marquees_dir, f"{target_name}_{counter}{UNIFIED_IMAGE_EXT}")
-                    counter += 1
-                _convert_image_to_png(file_path, dest_path, log_func=log_func)
+                if force_overwrite:
+                    if log_func:
+                        log_func(f"    覆盖: {dest_path}")
+                    _convert_image_to_png(file_path, dest_path, log_func=log_func)
+                else:
+                    if os.path.exists(dest_path):
+                        if log_func:
+                            log_func(f"    跳过: {target_name}{UNIFIED_IMAGE_EXT} (已存在)")
+                        continue
+                    _convert_image_to_png(file_path, dest_path, log_func=log_func)
                 if log_func:
                     log_func(f"    logo -> assets/marquees/{target_name}{UNIFIED_IMAGE_EXT}")
                 counts['marquees'] += 1
 
             elif name_lower == 'video':
                 dest_path = os.path.join(videos_dir, f"{target_name}{ext}")
-                counter = 1
-                while os.path.exists(dest_path):
-                    dest_path = os.path.join(videos_dir, f"{target_name}_{counter}{ext}")
-                    counter += 1
-                shutil.copy2(file_path, dest_path)
+                if force_overwrite:
+                    if log_func:
+                        log_func(f"    覆盖: {dest_path}")
+                    shutil.copy2(file_path, dest_path)
+                else:
+                    if os.path.exists(dest_path):
+                        if log_func:
+                            log_func(f"    跳过: {target_name}{ext} (已存在)")
+                        continue
+                    shutil.copy2(file_path, dest_path)
                 if log_func:
                     log_func(f"    video -> assets/videos/{target_name}{ext}")
                 counts['videos'] += 1
@@ -683,16 +698,35 @@ def run_integrated_process(config, log_func=None):
     screenshot_unit = config.get('screenshot_unit', '秒')
     smart_screenshot = config.get('smart_screenshot', True)
     max_delay_sec_str = config.get('max_delay_sec', '30')
+    ffmpeg_cmd = config.get('ffmpeg_path', 'ffmpeg').strip() or 'ffmpeg'
+    solid_threshold_str = config.get('solid_threshold', '0.8')
 
     try:
         max_delay_sec = int(max_delay_sec_str)
+        if max_delay_sec < 1:
+            max_delay_sec = 1
+        elif max_delay_sec > 300:
+            max_delay_sec = 300
     except (ValueError, TypeError):
         max_delay_sec = 30
 
     try:
         screenshot_value = float(screenshot_value_str)
+        if screenshot_value < 0.1:
+            screenshot_value = 0.1
+        elif screenshot_value > 3600:
+            screenshot_value = 3600
     except ValueError:
         screenshot_value = 5.0
+
+    try:
+        solid_threshold = float(solid_threshold_str)
+        if solid_threshold < 0.5:
+            solid_threshold = 0.5
+        elif solid_threshold > 0.99:
+            solid_threshold = 0.99
+    except (ValueError, TypeError):
+        solid_threshold = 0.8
 
     if screenshot_unit == '帧':
         frame_time_sec = screenshot_value / 30.0
@@ -806,7 +840,7 @@ def run_integrated_process(config, log_func=None):
             if os.path.isdir(media_dir):
                 if log_func:
                     log_func(f"\n  --- 步骤3: 处理媒体文件 ---")
-                counts = process_media_folder(media_dir, target_dir, file_to_game, log_func=log_func)
+                counts = process_media_folder(media_dir, target_dir, file_to_game, force_overwrite=force_overwrite, log_func=log_func)
                 total_stats['covers'] += counts['covers']
                 total_stats['marquees'] += counts['marquees']
                 total_stats['videos'] += counts['videos']
@@ -838,10 +872,12 @@ def run_integrated_process(config, log_func=None):
                                 if extract_video_frame_with_fallback(
                                     video_path, out_img, frame_time_sec,
                                     max_delay_sec=max_delay_sec, step_sec=1,
+                                    solid_threshold=solid_threshold,
+                                    ffmpeg_cmd=ffmpeg_cmd,
                                     log_func=log_func):
                                     total_stats['screenshots'] += 1
                             else:
-                                if extract_video_frame_simple(video_path, out_img, frame_time_sec, log_func=log_func):
+                                if extract_video_frame_simple(video_path, out_img, frame_time_sec, ffmpeg_cmd=ffmpeg_cmd, log_func=log_func):
                                     total_stats['screenshots'] += 1
 
         if do_gamelist:
@@ -860,7 +896,7 @@ def run_integrated_process(config, log_func=None):
         log_func(f"  screenshots: {total_stats['screenshots']}")
 
 
-def extract_video_frame_simple(video_path, output_image_path, frame_time_sec=0, log_func=None):
+def extract_video_frame_simple(video_path, output_image_path, frame_time_sec=0, ffmpeg_cmd='ffmpeg', log_func=None):
     if not os.path.isfile(video_path):
         if log_func:
             log_func(f"  视频文件不存在: {video_path}")
@@ -868,7 +904,7 @@ def extract_video_frame_simple(video_path, output_image_path, frame_time_sec=0, 
 
     try:
         result = subprocess.run(
-            ['ffmpeg', '-y', '-ss', str(frame_time_sec), '-i', video_path,
+            [ffmpeg_cmd, '-y', '-ss', str(frame_time_sec), '-i', video_path,
              '-f', 'image2', '-frames:v', '1', '-q:v', '2', output_image_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -892,8 +928,14 @@ class IntegratedProcessorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("天马G游戏元数据处理器")
-        self.root.geometry("850x800")
-        self.root.minsize(800, 750)
+        win_w, win_h = 750, 700
+        screen_w = self.root.winfo_screenwidth()
+        # screen_h = self.root.winfo_screenheight()
+        x = (screen_w - win_w) // 2
+        # y = (screen_h - win_h) // 2
+        y = 10
+        self.root.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        self.root.minsize(550, 580)
 
         self._build_ui()
         self._load_config()
@@ -904,53 +946,43 @@ class IntegratedProcessorApp:
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, **pad)
 
-        title_label = ttk.Label(main_frame,
-                                text="核心原理: 先处理ROM → 记录实际输出路径 → 基于实际路径生成gamelist.xml",
-                                foreground='#0066cc', font=('Consolas', 9))
-        title_label.pack(fill=tk.X, padx=10, pady=(5, 10))
+        dirs_frame = ttk.LabelFrame(main_frame, text="目录设置")
+        dirs_frame.pack(fill=tk.X, **pad)
 
-        source_frame = ttk.LabelFrame(main_frame, text="源目录设置")
-        source_frame.pack(fill=tk.X, **pad)
-
-        ttk.Label(source_frame, text="源目录:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(dirs_frame, text="源目录:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=3)
         self.source_dir_var = tk.StringVar()
-        ttk.Entry(source_frame, textvariable=self.source_dir_var, width=60).grid(
-            row=0, column=1, padx=5, pady=5, sticky=tk.EW)
-        ttk.Button(source_frame, text="浏览...", command=self._browse_source).grid(
-            row=0, column=2, padx=5, pady=5)
+        ttk.Entry(dirs_frame, textvariable=self.source_dir_var, width=60).grid(
+            row=0, column=1, padx=5, pady=3, sticky=tk.EW)
+        ttk.Button(dirs_frame, text="浏览...", command=self._browse_source).grid(
+            row=0, column=2, padx=5, pady=3)
 
         self.recursive_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(source_frame, text="递归搜索子目录", variable=self.recursive_var).grid(
-            row=1, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(dirs_frame, text="递归搜索子目录", variable=self.recursive_var).grid(
+            row=0, column=3, padx=10, pady=3, sticky=tk.W)
 
-        rom_frame = ttk.LabelFrame(main_frame, text="ROM文件目录设置")
-        rom_frame.pack(fill=tk.X, **pad)
-
-        ttk.Label(rom_frame, text="ROM目录:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(dirs_frame, text="ROM目录:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=3)
         self.rom_dir_var = tk.StringVar()
-        ttk.Entry(rom_frame, textvariable=self.rom_dir_var, width=60).grid(
-            row=0, column=1, padx=5, pady=5, sticky=tk.EW)
-        ttk.Button(rom_frame, text="浏览...", command=self._browse_rom).grid(
-            row=0, column=2, padx=5, pady=5)
+        ttk.Entry(dirs_frame, textvariable=self.rom_dir_var, width=60).grid(
+            row=1, column=1, padx=5, pady=3, sticky=tk.EW)
+        ttk.Button(dirs_frame, text="浏览...", command=self._browse_rom).grid(
+            row=1, column=2, padx=5, pady=3)
+        ttk.Label(dirs_frame, text="(留空使用源目录)",
+                  foreground='gray').grid(row=1, column=3, padx=10, pady=3, sticky=tk.W)
 
-        ttk.Label(rom_frame, text="(包含ROM压缩包或文件的目录，留空则默认使用源目录)",
-                  foreground='gray').grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
-
-        output_frame = ttk.LabelFrame(main_frame, text="输出目录设置")
-        output_frame.pack(fill=tk.X, **pad)
-
-        ttk.Label(output_frame, text="输出目录:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(dirs_frame, text="输出目录:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=3)
         self.output_dir_var = tk.StringVar()
-        ttk.Entry(output_frame, textvariable=self.output_dir_var, width=60).grid(
-            row=0, column=1, padx=5, pady=5, sticky=tk.EW)
-        ttk.Button(output_frame, text="浏览...", command=self._browse_output).grid(
-            row=0, column=2, padx=5, pady=5)
-        ttk.Label(output_frame, text="(留空则输出到源目录下的 output 文件夹)",
-                  foreground='gray').grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(dirs_frame, textvariable=self.output_dir_var, width=60).grid(
+            row=2, column=1, padx=5, pady=3, sticky=tk.EW)
+        ttk.Button(dirs_frame, text="浏览...", command=self._browse_output).grid(
+            row=2, column=2, padx=5, pady=3)
+        ttk.Label(dirs_frame, text="(留空输出到源目录/output)",
+                  foreground='gray').grid(row=2, column=3, padx=10, pady=3, sticky=tk.W)
 
         self.no_subfolder_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(output_frame, text="直接输出到输出目录下",
-                        variable=self.no_subfolder_var).grid(row=2, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(dirs_frame, text="直接输出到目标目录 (不创建同名子文件夹)",
+                        variable=self.no_subfolder_var).grid(row=3, column=0, columnspan=4, sticky=tk.W, padx=5, pady=2)
+
+        dirs_frame.columnconfigure(1, weight=1)
 
         options_frame = ttk.LabelFrame(main_frame, text="处理选项")
         options_frame.pack(fill=tk.X, **pad)
@@ -1001,6 +1033,13 @@ class IntegratedProcessorApp:
                         value="帧")
         self.screenshot_radio_frame.pack(side=tk.LEFT, padx=(0, 5))
 
+        ttk.Label(self.screenshot_frame, text="  ffmpeg路径:").pack(side=tk.LEFT, padx=(10, 2))
+        self.ffmpeg_path_var = tk.StringVar(value="ffmpeg")
+        self.ffmpeg_path_entry = ttk.Entry(self.screenshot_frame, textvariable=self.ffmpeg_path_var, width=20)
+        self.ffmpeg_path_entry.pack(side=tk.LEFT, padx=(0, 5))
+        self.ffmpeg_browse_btn = ttk.Button(self.screenshot_frame, text="浏览", command=self._browse_ffmpeg, width=5)
+        self.ffmpeg_browse_btn.pack(side=tk.LEFT)
+
         self.smart_screenshot_var = tk.BooleanVar(value=True)
         self.smart_frame = ttk.Frame(options_frame)
         self.smart_frame.grid(row=8, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
@@ -1008,10 +1047,15 @@ class IntegratedProcessorApp:
                         variable=self.smart_screenshot_var)
         self.smart_screenshot_cb.pack(side=tk.LEFT)
         ttk.Label(self.smart_frame, text="最大延后:").pack(side=tk.LEFT, padx=(10, 2))
-        self.max_delay_var = tk.StringVar(value="30")
+        self.max_delay_var = tk.StringVar(value="15")
         self.max_delay_entry = ttk.Entry(self.smart_frame, textvariable=self.max_delay_var, width=6)
         self.max_delay_entry.pack(side=tk.LEFT)
         ttk.Label(self.smart_frame, text="秒").pack(side=tk.LEFT, padx=(3, 0))
+        ttk.Label(self.smart_frame, text=" 阈值:").pack(side=tk.LEFT, padx=(10, 2))
+        self.solid_threshold_var = tk.StringVar(value="0.80")
+        self.solid_threshold_entry = ttk.Entry(self.smart_frame, textvariable=self.solid_threshold_var, width=5)
+        self.solid_threshold_entry.pack(side=tk.LEFT)
+        ttk.Label(self.smart_frame, text="(0.50-0.99)").pack(side=tk.LEFT, padx=(3, 0))
 
         self._update_screenshot_state()
 
@@ -1045,6 +1089,8 @@ class IntegratedProcessorApp:
             side=tk.LEFT, padx=5, pady=5)
         ttk.Button(button_frame, text="加载配置", command=self._load_config).pack(
             side=tk.LEFT, padx=5, pady=5)
+        ttk.Button(button_frame, text="导出日志", command=self._export_log).pack(
+            side=tk.RIGHT, padx=5, pady=5)
         ttk.Button(button_frame, text="清空日志", command=self._clear_log).pack(
             side=tk.RIGHT, padx=5, pady=5)
 
@@ -1054,10 +1100,6 @@ class IntegratedProcessorApp:
         self.log_text = scrolledtext.ScrolledText(log_frame, height=12, wrap=tk.WORD,
                                                    font=('Consolas', 9))
         self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        source_frame.columnconfigure(1, weight=1)
-        rom_frame.columnconfigure(1, weight=1)
-        output_frame.columnconfigure(1, weight=1)
 
     def _browse_source(self):
         d = filedialog.askdirectory(title="选择源目录")
@@ -1082,6 +1124,24 @@ class IntegratedProcessorApp:
     def _clear_log(self):
         self.log_text.delete('1.0', tk.END)
 
+    def _export_log(self):
+        log_content = self.log_text.get('1.0', tk.END).strip()
+        if not log_content:
+            messagebox.showinfo("提示", "日志为空，无需导出")
+            return
+        fpath = filedialog.asksaveasfilename(
+            title="导出日志",
+            defaultextension=".log",
+            filetypes=[("日志文件", "*.log"), ("文本文件", "*.txt"), ("所有文件", "*.*")])
+        if not fpath:
+            return
+        try:
+            with open(fpath, 'w', encoding='utf-8') as f:
+                f.write(log_content)
+            messagebox.showinfo("成功", f"日志已导出到:\n{fpath}")
+        except Exception as e:
+            messagebox.showerror("错误", f"导出日志失败: {str(e)}")
+
     def _update_prefix_state(self):
         if self.do_gamelist_var.get():
             self.add_prefix_cb.config(state=tk.NORMAL)
@@ -1093,8 +1153,18 @@ class IntegratedProcessorApp:
         self.screenshot_value_entry.config(state=state)
         self.screenshot_radio_sec.config(state=state)
         self.screenshot_radio_frame.config(state=state)
+        self.ffmpeg_path_entry.config(state=state)
+        self.ffmpeg_browse_btn.config(state=state)
         self.smart_screenshot_cb.config(state=state)
         self.max_delay_entry.config(state=state)
+        self.solid_threshold_entry.config(state=state)
+
+    def _browse_ffmpeg(self):
+        f = filedialog.askopenfilename(
+            title="选择 ffmpeg 可执行文件",
+            filetypes=[("可执行文件", "*.exe"), ("所有文件", "*.*")])
+        if f:
+            self.ffmpeg_path_var.set(f)
 
     def _get_config(self):
         return {
@@ -1112,9 +1182,10 @@ class IntegratedProcessorApp:
             'screenshot_unit': self.screenshot_unit_var.get(),
             'smart_screenshot': self.smart_screenshot_var.get(),
             'max_delay_sec': self.max_delay_var.get().strip(),
+            'solid_threshold': self.solid_threshold_var.get().strip(),
             'no_subfolder': self.no_subfolder_var.get(),
             'recursive': self.recursive_var.get(),
-            'ffmpeg_path': 'ffmpeg',
+            'ffmpeg_path': self.ffmpeg_path_var.get().strip(),
         }
 
     def _save_config(self):
@@ -1148,6 +1219,8 @@ class IntegratedProcessorApp:
             self.screenshot_unit_var.set(config.get('screenshot_unit', '秒'))
             self.smart_screenshot_var.set(config.get('smart_screenshot', True))
             self.max_delay_var.set(config.get('max_delay_sec', '30'))
+            self.solid_threshold_var.set(config.get('solid_threshold', '0.80'))
+            self.ffmpeg_path_var.set(config.get('ffmpeg_path', 'ffmpeg'))
             self.no_subfolder_var.set(config.get('no_subfolder', False))
             self.recursive_var.set(config.get('recursive', True))
             self._update_prefix_state()

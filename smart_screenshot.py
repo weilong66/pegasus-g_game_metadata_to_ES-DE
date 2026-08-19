@@ -10,7 +10,7 @@ except ImportError:
     HAS_PIL = False
 
 
-def is_solid_color_frame(image_path, threshold=0.7):
+def is_solid_color_frame(image_path, threshold=0.8):
     """
     检测画面是否为纯色（如黑屏、白屏、绿屏等）。
     
@@ -66,19 +66,20 @@ def is_solid_color_frame(image_path, threshold=0.7):
         return True, f"检测失败: {str(e)}"
 
 
-def get_video_duration(video_path):
+def get_video_duration(video_path, ffmpeg_cmd='ffprobe'):
     """
     获取视频时长（秒）。
     
     Args:
         video_path: 视频文件路径
-    
+        ffmpeg_cmd: ffprobe 命令路径
+        
     Returns:
         float: 视频时长（秒），获取失败返回 None
     """
     try:
         result = subprocess.run(
-            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+            [ffmpeg_cmd.replace('ffmpeg', 'ffprobe'), '-v', 'error', '-show_entries', 'format=duration',
              '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -93,7 +94,8 @@ def get_video_duration(video_path):
 
 
 def extract_video_frame_with_fallback(video_path, output_image_path, target_time_sec=5,
-                                      max_delay_sec=30, step_sec=1, log_func=None):
+                                      max_delay_sec=30, step_sec=1,
+                                      solid_threshold=0.8, ffmpeg_cmd='ffmpeg', log_func=None):
     """
     从视频中提取帧，智能检测纯色帧并自动延后寻找正常画面。
     
@@ -103,6 +105,8 @@ def extract_video_frame_with_fallback(video_path, output_image_path, target_time
         target_time_sec: 目标截图时间（秒）
         max_delay_sec: 最大延后时间（秒），超过此时间则使用原时间点
         step_sec: 每次延后的步长（秒）
+        solid_threshold: 纯色占比阈值（0.5-0.99），超过此值则判定为纯色帧
+        ffmpeg_cmd: ffmpeg 命令路径
         log_func: 日志函数
     
     Returns:
@@ -120,13 +124,20 @@ def extract_video_frame_with_fallback(video_path, output_image_path, target_time
         max_delay_sec = 30.0
         step_sec = 1.0
     
-    duration = get_video_duration(video_path)
+    try:
+        solid_threshold = float(solid_threshold)
+        if solid_threshold < 0.5:
+            solid_threshold = 0.5
+        elif solid_threshold > 0.99:
+            solid_threshold = 0.99
+    except (ValueError, TypeError):
+        solid_threshold = 0.8
+    
+    duration = get_video_duration(video_path, ffmpeg_cmd)
     if duration and target_time_sec >= duration:
         if log_func:
             log_func(f"    目标时间 {target_time_sec:.1f}s 超出视频时长 {duration:.1f}s")
         target_time_sec = max(0, duration - 1)
-    
-    solid_threshold = 0.8
     
     with tempfile.TemporaryDirectory() as temp_dir:
         for attempt in range(int(max_delay_sec / step_sec) + 1):
@@ -142,7 +153,7 @@ def extract_video_frame_with_fallback(video_path, output_image_path, target_time
             
             try:
                 result = subprocess.run(
-                    ['ffmpeg', '-y', '-ss', str(current_time), '-i', video_path,
+                    [ffmpeg_cmd, '-y', '-ss', str(current_time), '-i', video_path,
                      '-f', 'image2', '-frames:v', '1', '-q:v', '2', temp_img],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
