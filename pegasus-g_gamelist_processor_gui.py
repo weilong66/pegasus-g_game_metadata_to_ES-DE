@@ -512,6 +512,32 @@ def process_media_folder(media_dir, output_base, file_to_game, log_func=None):
     return counts
 
 
+def build_mapping_from_output_dir(target_dir, log_func=None):
+    """
+    从输出目录扫描已存在的文件，构建文件名映射。
+    用于当未处理ROM文件时，从已有文件中推断映射关系。
+    """
+    mapping = {}
+    if not os.path.isdir(target_dir):
+        return mapping
+
+    try:
+        for entry in os.listdir(target_dir):
+            entry_path = os.path.join(target_dir, entry)
+            if os.path.isfile(entry_path):
+                stem = Path(entry).stem
+                mapping[stem] = entry
+            elif os.path.isdir(entry_path) and not entry.startswith('assets'):
+                mapping[entry] = entry + '/'
+    except Exception as e:
+        if log_func:
+            log_func(f"    扫描输出目录失败: {str(e)}")
+
+    if log_func:
+        log_func(f"    从输出目录构建了 {len(mapping)} 个映射")
+    return mapping
+
+
 def resolve_file_path(file_val, rom_mapping=None):
     if not file_val:
         return './'
@@ -648,7 +674,9 @@ def run_integrated_process(config, log_func=None):
     add_prefix = config.get('add_prefix', True)
     do_roms = config.get('do_roms', True)
     do_media = config.get('do_media', True)
+    do_gamelist = config.get('do_gamelist', True)
     do_screenshots = config.get('do_screenshots', False)
+    no_subfolder = config.get('no_subfolder', False)
     recursive = config.get('recursive', True)
     copy_archives_directly = config.get('copy_archives_directly', False)
     screenshot_value_str = config.get('screenshot_value', '5')
@@ -704,12 +732,18 @@ def run_integrated_process(config, log_func=None):
     for meta_path in metadata_files:
         meta_dir = os.path.dirname(meta_path)
         folder_name = os.path.basename(meta_dir)
-        target_dir = os.path.join(output_dir, folder_name)
+
+        if no_subfolder:
+            target_dir = output_dir
+        else:
+            target_dir = os.path.join(output_dir, folder_name)
         os.makedirs(target_dir, exist_ok=True)
 
         if log_func:
             log_func(f"\n{'='*60}")
             log_func(f"处理: {folder_name}")
+            if no_subfolder:
+                log_func(f"  输出模式: 直接输出到目标目录 (不创建子文件夹)")
             log_func(f"{'='*60}")
 
         games = parse_metadata(meta_path)
@@ -746,14 +780,26 @@ def run_integrated_process(config, log_func=None):
             if log_func:
                 log_func(f"\n  --- 步骤1: 跳过ROM处理 ---")
 
-        if log_func:
-            log_func(f"\n  --- 步骤2: 生成 gamelist.xml (使用实际输出路径) ---")
+        if do_gamelist:
+            if not do_roms and rom_mapping == {}:
+                if log_func:
+                    log_func(f"\n  --- 补充: 从输出目录构建ROM映射 ---")
+                rom_mapping = build_mapping_from_output_dir(target_dir, log_func=log_func)
+                if not rom_mapping:
+                    if log_func:
+                        log_func(f"    输出目录为空，无映射可用，将使用原始文件名")
 
-        generated = create_gamelist_xml(games, os.path.join(target_dir, 'gamelist.xml'),
-                                        name_prefix=add_prefix, rom_mapping=rom_mapping)
-        if log_func:
-            log_func(f"  ✓ 已生成 gamelist.xml ({generated} 个游戏元素)")
-        total_stats['games'] += generated
+            if log_func:
+                log_func(f"\n  --- 步骤2: 生成 gamelist.xml (使用实际输出路径) ---")
+
+            generated = create_gamelist_xml(games, os.path.join(target_dir, 'gamelist.xml'),
+                                            name_prefix=add_prefix, rom_mapping=rom_mapping)
+            if log_func:
+                log_func(f"  ✓ 已生成 gamelist.xml ({generated} 个游戏元素)")
+            total_stats['games'] += generated
+        else:
+            if log_func:
+                log_func(f"\n  --- 步骤2: 跳过 gamelist.xml 生成 ---")
 
         if do_media:
             media_dir = os.path.join(meta_dir, 'media')
@@ -798,10 +844,11 @@ def run_integrated_process(config, log_func=None):
                                 if extract_video_frame_simple(video_path, out_img, frame_time_sec, log_func=log_func):
                                     total_stats['screenshots'] += 1
 
-        if log_func:
-            log_func(f"\n  --- 步骤5: 验证 gamelist.xml 路径 ---")
-        gamelist_path = os.path.join(target_dir, 'gamelist.xml')
-        verify_gamelist_paths(gamelist_path, target_dir, log_func=log_func)
+        if do_gamelist:
+            if log_func:
+                log_func(f"\n  --- 步骤5: 验证 gamelist.xml 路径 ---")
+            gamelist_path = os.path.join(target_dir, 'gamelist.xml')
+            verify_gamelist_paths(gamelist_path, target_dir, log_func=log_func)
 
     if log_func:
         log_func(f"\n{'='*60}")
@@ -901,6 +948,10 @@ class IntegratedProcessorApp:
         ttk.Label(output_frame, text="(留空则输出到源目录下的 output 文件夹)",
                   foreground='gray').grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
 
+        self.no_subfolder_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(output_frame, text="直接输出到输出目录下",
+                        variable=self.no_subfolder_var).grid(row=2, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
+
         options_frame = ttk.LabelFrame(main_frame, text="处理选项")
         options_frame.pack(fill=tk.X, **pad)
 
@@ -912,61 +963,78 @@ class IntegratedProcessorApp:
         ttk.Checkbutton(options_frame, text="处理媒体文件 (covers/marquees/videos)",
                         variable=self.do_media_var).grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
 
+        self.do_gamelist_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(options_frame, text="生成 gamelist.xml 文件",
+                        variable=self.do_gamelist_var, command=self._update_prefix_state).grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+
         self.add_prefix_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="为游戏名称添加拼音首字母前缀",
-                        variable=self.add_prefix_var).grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        self.add_prefix_cb = ttk.Checkbutton(options_frame, text="  └ 为游戏名称添加拼音首字母前缀",
+                        variable=self.add_prefix_var)
+        self.add_prefix_cb.grid(row=3, column=0, sticky=tk.W, padx=25, pady=2)
+        self._update_prefix_state()
 
         self.force_overwrite_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(options_frame, text="强制覆盖已存在的文件",
-                        variable=self.force_overwrite_var).grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
+                        variable=self.force_overwrite_var).grid(row=4, column=0, sticky=tk.W, padx=5, pady=2)
 
         self.copy_archives_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(options_frame, text="直接复制压缩文件（不解压，保留原始压缩包）",
-                        variable=self.copy_archives_var).grid(row=4, column=0, sticky=tk.W, padx=5, pady=2)
+                        variable=self.copy_archives_var).grid(row=5, column=0, sticky=tk.W, padx=5, pady=2)
 
         self.do_screenshots_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(options_frame, text="从视频中提取截图 (需要ffmpeg)",
-                        variable=self.do_screenshots_var).grid(row=5, column=0, sticky=tk.W, padx=5, pady=2)
+                        variable=self.do_screenshots_var, command=self._update_screenshot_state).grid(row=6, column=0, sticky=tk.W, padx=5, pady=2)
 
-        screenshot_frame = ttk.Frame(options_frame)
-        screenshot_frame.grid(row=6, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
+        self.screenshot_frame = ttk.Frame(options_frame)
+        self.screenshot_frame.grid(row=7, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
 
-        ttk.Label(screenshot_frame, text="截图时间点:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(self.screenshot_frame, text="截图时间点:").pack(side=tk.LEFT, padx=(0, 5))
         self.screenshot_value_var = tk.StringVar(value="1")
-        ttk.Entry(screenshot_frame, textvariable=self.screenshot_value_var, width=8).pack(side=tk.LEFT, padx=(0, 5))
+        self.screenshot_value_entry = ttk.Entry(self.screenshot_frame, textvariable=self.screenshot_value_var, width=8)
+        self.screenshot_value_entry.pack(side=tk.LEFT, padx=(0, 5))
 
         self.screenshot_unit_var = tk.StringVar(value="秒")
-        ttk.Radiobutton(screenshot_frame, text="秒", variable=self.screenshot_unit_var,
-                        value="秒").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Radiobutton(screenshot_frame, text="帧", variable=self.screenshot_unit_var,
-                        value="帧").pack(side=tk.LEFT, padx=(0, 5))
+        self.screenshot_radio_sec = ttk.Radiobutton(self.screenshot_frame, text="秒", variable=self.screenshot_unit_var,
+                        value="秒")
+        self.screenshot_radio_sec.pack(side=tk.LEFT, padx=(0, 5))
+        self.screenshot_radio_frame = ttk.Radiobutton(self.screenshot_frame, text="帧", variable=self.screenshot_unit_var,
+                        value="帧")
+        self.screenshot_radio_frame.pack(side=tk.LEFT, padx=(0, 5))
 
         self.smart_screenshot_var = tk.BooleanVar(value=True)
-        smart_frame = ttk.Frame(options_frame)
-        smart_frame.grid(row=7, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
-        ttk.Checkbutton(smart_frame, text="智能截图（检测纯色帧自动延后）",
-                        variable=self.smart_screenshot_var).pack(side=tk.LEFT)
-        ttk.Label(smart_frame, text="最大延后:").pack(side=tk.LEFT, padx=(10, 2))
+        self.smart_frame = ttk.Frame(options_frame)
+        self.smart_frame.grid(row=8, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
+        self.smart_screenshot_cb = ttk.Checkbutton(self.smart_frame, text="智能截图（检测纯色帧自动延后）",
+                        variable=self.smart_screenshot_var)
+        self.smart_screenshot_cb.pack(side=tk.LEFT)
+        ttk.Label(self.smart_frame, text="最大延后:").pack(side=tk.LEFT, padx=(10, 2))
         self.max_delay_var = tk.StringVar(value="30")
-        ttk.Entry(smart_frame, textvariable=self.max_delay_var, width=6).pack(side=tk.LEFT)
-        ttk.Label(smart_frame, text="秒").pack(side=tk.LEFT, padx=(3, 0))
+        self.max_delay_entry = ttk.Entry(self.smart_frame, textvariable=self.max_delay_var, width=6)
+        self.max_delay_entry.pack(side=tk.LEFT)
+        ttk.Label(self.smart_frame, text="秒").pack(side=tk.LEFT, padx=(3, 0))
 
+        self._update_screenshot_state()
+
+        row_idx = 9
         if not HAS_SMART_SCREENSHOT:
             ttk.Label(options_frame, text="提示: 智能截图模块未找到，将使用基础截图",
-                      foreground='orange').grid(row=8, column=0, sticky=tk.W, padx=5, pady=2)
+                      foreground='orange').grid(row=row_idx, column=0, sticky=tk.W, padx=5, pady=2)
+            row_idx += 1
         elif not HAS_PIL:
             ttk.Label(options_frame, text="提示: 未安装Pillow，智能截图的纯色检测不可用",
-                      foreground='orange').grid(row=8, column=0, sticky=tk.W, padx=5, pady=2)
+                      foreground='orange').grid(row=row_idx, column=0, sticky=tk.W, padx=5, pady=2)
+            row_idx += 1
 
         if not HAS_PINYIN:
             ttk.Label(options_frame, text="警告: 未安装pypinyin，名称前缀功能不可用",
-                      foreground='red').grid(row=9, column=0, sticky=tk.W, padx=5, pady=2)
+                      foreground='red').grid(row=row_idx, column=0, sticky=tk.W, padx=5, pady=2)
+            row_idx += 1
 
         if not HAS_PIL and HAS_SMART_SCREENSHOT:
             pass  # 已在上方提示
         elif not HAS_PIL:
             ttk.Label(options_frame, text="警告: 未安装Pillow，图片格式转换不可用",
-                      foreground='red').grid(row=10, column=0, sticky=tk.W, padx=5, pady=2)
+                      foreground='red').grid(row=row_idx, column=0, sticky=tk.W, padx=5, pady=2)
 
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, **pad)
@@ -1014,6 +1082,20 @@ class IntegratedProcessorApp:
     def _clear_log(self):
         self.log_text.delete('1.0', tk.END)
 
+    def _update_prefix_state(self):
+        if self.do_gamelist_var.get():
+            self.add_prefix_cb.config(state=tk.NORMAL)
+        else:
+            self.add_prefix_cb.config(state=tk.DISABLED)
+
+    def _update_screenshot_state(self):
+        state = tk.NORMAL if self.do_screenshots_var.get() else tk.DISABLED
+        self.screenshot_value_entry.config(state=state)
+        self.screenshot_radio_sec.config(state=state)
+        self.screenshot_radio_frame.config(state=state)
+        self.smart_screenshot_cb.config(state=state)
+        self.max_delay_entry.config(state=state)
+
     def _get_config(self):
         return {
             'source_dir': self.source_dir_var.get().strip(),
@@ -1021,6 +1103,7 @@ class IntegratedProcessorApp:
             'output_dir': self.output_dir_var.get().strip(),
             'do_roms': self.do_roms_var.get(),
             'do_media': self.do_media_var.get(),
+            'do_gamelist': self.do_gamelist_var.get(),
             'add_prefix': self.add_prefix_var.get(),
             'force_overwrite': self.force_overwrite_var.get(),
             'copy_archives_directly': self.copy_archives_var.get(),
@@ -1029,6 +1112,7 @@ class IntegratedProcessorApp:
             'screenshot_unit': self.screenshot_unit_var.get(),
             'smart_screenshot': self.smart_screenshot_var.get(),
             'max_delay_sec': self.max_delay_var.get().strip(),
+            'no_subfolder': self.no_subfolder_var.get(),
             'recursive': self.recursive_var.get(),
             'ffmpeg_path': 'ffmpeg',
         }
@@ -1055,6 +1139,7 @@ class IntegratedProcessorApp:
             self.output_dir_var.set(config.get('output_dir', ''))
             self.do_roms_var.set(config.get('do_roms', True))
             self.do_media_var.set(config.get('do_media', True))
+            self.do_gamelist_var.set(config.get('do_gamelist', True))
             self.add_prefix_var.set(config.get('add_prefix', True))
             self.force_overwrite_var.set(config.get('force_overwrite', False))
             self.copy_archives_var.set(config.get('copy_archives_directly', False))
@@ -1063,7 +1148,10 @@ class IntegratedProcessorApp:
             self.screenshot_unit_var.set(config.get('screenshot_unit', '秒'))
             self.smart_screenshot_var.set(config.get('smart_screenshot', True))
             self.max_delay_var.set(config.get('max_delay_sec', '30'))
+            self.no_subfolder_var.set(config.get('no_subfolder', False))
             self.recursive_var.set(config.get('recursive', True))
+            self._update_prefix_state()
+            self._update_screenshot_state()
             self._log(f"配置已加载: {CONFIG_FILE}")
         except Exception as e:
             self._log(f"加载配置失败: {str(e)}")
