@@ -447,6 +447,8 @@ def process_all(config, log_func=None):
     do_metadata = config.get('do_metadata', True)
     do_media = config.get('do_media', True)
     do_screenshots = config.get('do_screenshots', False)
+    do_gamelist_only = config.get('do_gamelist_only', False)
+    create_subfolder = config.get('create_subfolder', True)
     ffmpeg_path = config.get('ffmpeg_path', 'ffmpeg')
     frame_time = config.get('frame_time', 0)
     recursive = config.get('recursive', True)
@@ -472,12 +474,20 @@ def process_all(config, log_func=None):
     if log_func:
         log_func(f"找到 {len(metadata_files)} 个 metadata.pegasus.txt 文件")
 
+    if do_gamelist_only and log_func:
+        log_func(f"(仅生成gamelist.xml，不处理媒体文件)")
+
     total_stats = {'games': 0, 'covers': 0, 'marquees': 0, 'videos': 0, 'screenshots': 0}
 
     for meta_path in metadata_files:
         meta_dir = os.path.dirname(meta_path)
         folder_name = os.path.basename(meta_dir)
-        target_dir = os.path.join(output_dir, folder_name)
+        
+        if create_subfolder:
+            target_dir = os.path.join(output_dir, folder_name)
+        else:
+            target_dir = output_dir
+        
         os.makedirs(target_dir, exist_ok=True)
 
         if log_func:
@@ -591,6 +601,10 @@ class PegasusConverterApp:
         ttk.Label(output_frame, text="(留空则输出到脚本目录下的 output 文件夹)", foreground='gray').grid(
             row=1, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
 
+        self.create_subfolder_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(output_frame, text="在输出目录下创建并放入原文件夹中",
+                        variable=self.create_subfolder_var).grid(row=2, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
+
         options_frame = ttk.LabelFrame(main_frame, text="处理选项")
         options_frame.pack(fill=tk.X, **pad)
 
@@ -610,6 +624,10 @@ class PegasusConverterApp:
         self.do_screenshots_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(options_frame, text="从视频中提取截图 (需要ffmpeg)",
                         variable=self.do_screenshots_var).grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
+
+        self.do_gamelist_only_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options_frame, text="只生成gamelist列表文件 (不处理媒体文件)",
+                        variable=self.do_gamelist_only_var).grid(row=4, column=0, sticky=tk.W, padx=5, pady=2)
 
         ffmpeg_frame = ttk.LabelFrame(main_frame, text="FFmpeg 设置")
         ffmpeg_frame.pack(fill=tk.X, **pad)
@@ -699,6 +717,8 @@ class PegasusConverterApp:
             'do_metadata': self.do_metadata_var.get(),
             'do_media': self.do_media_var.get(),
             'do_screenshots': self.do_screenshots_var.get(),
+            'do_gamelist_only': self.do_gamelist_only_var.get(),
+            'create_subfolder': self.create_subfolder_var.get(),
             'ffmpeg_path': self.ffmpeg_path_var.get().strip() or 'ffmpeg',
             'frame_time': frame_time,
             'recursive': self.recursive_var.get(),
@@ -726,6 +746,8 @@ class PegasusConverterApp:
             self.do_metadata_var.set(config.get('do_metadata', True))
             self.do_media_var.set(config.get('do_media', True))
             self.do_screenshots_var.set(config.get('do_screenshots', False))
+            self.do_gamelist_only_var.set(config.get('do_gamelist_only', False))
+            self.create_subfolder_var.set(config.get('create_subfolder', True))
             self.ffmpeg_path_var.set(config.get('ffmpeg_path', 'ffmpeg'))
             self.frame_time_var.set(str(config.get('frame_time', 0)))
             self.recursive_var.set(config.get('recursive', True))
@@ -744,9 +766,15 @@ class PegasusConverterApp:
             messagebox.showerror("错误", f"源目录不存在: {source_dir}")
             return
 
-        if not config.get('do_metadata', True) and not config.get('do_media', True) and not config.get('do_screenshots', False):
-            messagebox.showwarning("警告", "请至少选择一项处理选项！")
-            return
+        do_gamelist_only = config.get('do_gamelist_only', False)
+        if do_gamelist_only:
+            config['do_metadata'] = True
+            config['do_media'] = False
+            config['do_screenshots'] = False
+        else:
+            if not config.get('do_metadata', True) and not config.get('do_media', True) and not config.get('do_screenshots', False):
+                messagebox.showwarning("警告", "请至少选择一项处理选项！")
+                return
 
         if config.get('do_screenshots', False):
             ffmpeg_exe = config.get('ffmpeg_path', 'ffmpeg')
@@ -757,6 +785,8 @@ class PegasusConverterApp:
         self._log("=" * 50)
         self._log("开始处理...")
         self._log(f"源目录: {source_dir}")
+        if do_gamelist_only:
+            self._log("模式: 只生成gamelist列表文件")
         custom_out = config.get('output_dir', '').strip()
         if custom_out:
             self._log(f"输出目录: {custom_out}")
