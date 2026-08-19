@@ -29,6 +29,12 @@ except ImportError:
     HAS_PIL = False
 
 try:
+    from smart_screenshot import extract_video_frame_with_fallback, is_solid_color_frame, HAS_PIL as SS_HAS_PIL
+    HAS_SMART_SCREENSHOT = True
+except ImportError:
+    HAS_SMART_SCREENSHOT = False
+
+try:
     import zipfile
     HAS_ZIP = True
 except ImportError:
@@ -647,6 +653,13 @@ def run_integrated_process(config, log_func=None):
     copy_archives_directly = config.get('copy_archives_directly', False)
     screenshot_value_str = config.get('screenshot_value', '5')
     screenshot_unit = config.get('screenshot_unit', '秒')
+    smart_screenshot = config.get('smart_screenshot', True)
+    max_delay_sec_str = config.get('max_delay_sec', '30')
+
+    try:
+        max_delay_sec = int(max_delay_sec_str)
+    except (ValueError, TypeError):
+        max_delay_sec = 30
 
     try:
         screenshot_value = float(screenshot_value_str)
@@ -775,8 +788,15 @@ def run_integrated_process(config, log_func=None):
                             if not os.path.isfile(video_path):
                                 continue
                             out_img = os.path.join(screenshots_dir, f"{target_name}.png")
-                            if extract_video_frame_simple(video_path, out_img, frame_time_sec, log_func=log_func):
-                                total_stats['screenshots'] += 1
+                            if smart_screenshot and HAS_SMART_SCREENSHOT:
+                                if extract_video_frame_with_fallback(
+                                    video_path, out_img, frame_time_sec,
+                                    max_delay_sec=max_delay_sec, step_sec=1,
+                                    log_func=log_func):
+                                    total_stats['screenshots'] += 1
+                            else:
+                                if extract_video_frame_simple(video_path, out_img, frame_time_sec, log_func=log_func):
+                                    total_stats['screenshots'] += 1
 
         if log_func:
             log_func(f"\n  --- 步骤5: 验证 gamelist.xml 路径 ---")
@@ -912,7 +932,7 @@ class IntegratedProcessorApp:
         screenshot_frame.grid(row=6, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
 
         ttk.Label(screenshot_frame, text="截图时间点:").pack(side=tk.LEFT, padx=(0, 5))
-        self.screenshot_value_var = tk.StringVar(value="5")
+        self.screenshot_value_var = tk.StringVar(value="1")
         ttk.Entry(screenshot_frame, textvariable=self.screenshot_value_var, width=8).pack(side=tk.LEFT, padx=(0, 5))
 
         self.screenshot_unit_var = tk.StringVar(value="秒")
@@ -921,13 +941,32 @@ class IntegratedProcessorApp:
         ttk.Radiobutton(screenshot_frame, text="帧", variable=self.screenshot_unit_var,
                         value="帧").pack(side=tk.LEFT, padx=(0, 5))
 
+        self.smart_screenshot_var = tk.BooleanVar(value=True)
+        smart_frame = ttk.Frame(options_frame)
+        smart_frame.grid(row=7, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
+        ttk.Checkbutton(smart_frame, text="智能截图（检测纯色帧自动延后）",
+                        variable=self.smart_screenshot_var).pack(side=tk.LEFT)
+        ttk.Label(smart_frame, text="最大延后:").pack(side=tk.LEFT, padx=(10, 2))
+        self.max_delay_var = tk.StringVar(value="30")
+        ttk.Entry(smart_frame, textvariable=self.max_delay_var, width=6).pack(side=tk.LEFT)
+        ttk.Label(smart_frame, text="秒").pack(side=tk.LEFT, padx=(3, 0))
+
+        if not HAS_SMART_SCREENSHOT:
+            ttk.Label(options_frame, text="提示: 智能截图模块未找到，将使用基础截图",
+                      foreground='orange').grid(row=8, column=0, sticky=tk.W, padx=5, pady=2)
+        elif not HAS_PIL:
+            ttk.Label(options_frame, text="提示: 未安装Pillow，智能截图的纯色检测不可用",
+                      foreground='orange').grid(row=8, column=0, sticky=tk.W, padx=5, pady=2)
+
         if not HAS_PINYIN:
             ttk.Label(options_frame, text="警告: 未安装pypinyin，名称前缀功能不可用",
-                      foreground='red').grid(row=8, column=0, sticky=tk.W, padx=5, pady=2)
-
-        if not HAS_PIL:
-            ttk.Label(options_frame, text="警告: 未安装Pillow，图片格式转换不可用",
                       foreground='red').grid(row=9, column=0, sticky=tk.W, padx=5, pady=2)
+
+        if not HAS_PIL and HAS_SMART_SCREENSHOT:
+            pass  # 已在上方提示
+        elif not HAS_PIL:
+            ttk.Label(options_frame, text="警告: 未安装Pillow，图片格式转换不可用",
+                      foreground='red').grid(row=10, column=0, sticky=tk.W, padx=5, pady=2)
 
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, **pad)
@@ -988,6 +1027,8 @@ class IntegratedProcessorApp:
             'do_screenshots': self.do_screenshots_var.get(),
             'screenshot_value': self.screenshot_value_var.get().strip(),
             'screenshot_unit': self.screenshot_unit_var.get(),
+            'smart_screenshot': self.smart_screenshot_var.get(),
+            'max_delay_sec': self.max_delay_var.get().strip(),
             'recursive': self.recursive_var.get(),
             'ffmpeg_path': 'ffmpeg',
         }
@@ -1020,6 +1061,8 @@ class IntegratedProcessorApp:
             self.do_screenshots_var.set(config.get('do_screenshots', False))
             self.screenshot_value_var.set(config.get('screenshot_value', '5'))
             self.screenshot_unit_var.set(config.get('screenshot_unit', '秒'))
+            self.smart_screenshot_var.set(config.get('smart_screenshot', True))
+            self.max_delay_var.set(config.get('max_delay_sec', '30'))
             self.recursive_var.set(config.get('recursive', True))
             self._log(f"配置已加载: {CONFIG_FILE}")
         except Exception as e:
