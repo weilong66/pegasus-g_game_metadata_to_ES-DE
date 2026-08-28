@@ -20,6 +20,7 @@ Desktop.ini
 *.apk
 *.lnk
 *.json
+*.log
 
 
 # Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`

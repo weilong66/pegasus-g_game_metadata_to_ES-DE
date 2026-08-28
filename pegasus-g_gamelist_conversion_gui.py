@@ -226,9 +226,28 @@ def collect_files_recursive(directory):
     return files
 
 
-def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives_directly=False, subfolder=None, log_func=None):
+def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives_directly=False, subfolder=None, target_name=None, log_func=None):
+    """
+    处理单个ROM文件/压缩包。
+    - subfolder: 多文件分组目标子目录（相对 target_dir）；此时 target_name 作为文件夹名
+    - target_name: 输出文件名（不含扩展名），若为 None 则沿用原名；多文件时作为内部重命名基础
+    当目标文件已存在且 force_overwrite=False 时，仍返回 (original_stem, 实际目标名) 以保证映射可建立，
+    从而支持「外部手动复制 + 脚本仅生成映射」的工作流。
+    """
     file_name = Path(file_path).name
     original_stem = Path(file_path).stem
+    orig_ext = Path(file_path).suffix
+
+    # 单文件目标名（压缩包直接复制时保持原扩展名；否则以 target_name 作为 basename）
+    if subfolder:
+        # 多文件：子文件夹名由 subfolder 决定，内部文件名保持原名（避免多文件文件名冲突）
+        effective_target_name = file_name
+    else:
+        effective_target_name = target_name + orig_ext if (target_name and not copy_archives_directly) else file_name
+
+    # copy_archives_directly 模式：直接保留压缩包名（压缩包名本身就是 ROM 的唯一标识）
+    if copy_archives_directly:
+        effective_target_name = file_name
 
     dest_dir = target_dir
     if subfolder:
@@ -239,8 +258,8 @@ def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives
         dest_path = os.path.join(dest_dir, file_name)
         if os.path.exists(dest_path) and not force_overwrite:
             if log_func:
-                log_func(f"  跳过: {file_name} (目标已存在)")
-            return original_stem, subfolder + '/' if subfolder else None
+                log_func(f"  跳过: {file_name} (目标已存在，建立映射)")
+            return original_stem, subfolder + '/' if subfolder else file_name
         if os.path.exists(dest_path) and force_overwrite:
             if log_func:
                 log_func(f"  覆盖: {file_name}")
@@ -250,20 +269,22 @@ def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives
         return original_stem, (subfolder + '/' if subfolder else file_name)
 
     if not is_archive(file_path):
-        dest_path = os.path.join(dest_dir, file_name)
+        dest_path = os.path.join(dest_dir, effective_target_name)
         if os.path.exists(dest_path) and not force_overwrite:
             if log_func:
-                log_func(f"  跳过: {file_name} (目标已存在)")
-            return original_stem, subfolder + '/' if subfolder else None
+                log_func(f"  跳过: {effective_target_name} (目标已存在，建立映射)")
+            return original_stem, subfolder + '/' if subfolder else effective_target_name
         if os.path.exists(dest_path) and force_overwrite:
             if log_func:
-                log_func(f"  覆盖: {file_name}")
+                log_func(f"  覆盖: {effective_target_name}")
         shutil.copy2(file_path, dest_path)
         if log_func:
-            log_func(f"  复制: {file_name}")
-        return original_stem, (subfolder + '/' if subfolder else file_name)
+            log_func(f"  复制: {effective_target_name}")
+        return original_stem, (subfolder + '/' if subfolder else effective_target_name)
 
+    # 压缩包模式
     base_name = get_archive_base_name(file_path)
+    archive_target = target_name if target_name else base_name
 
     with tempfile.TemporaryDirectory() as temp_dir:
         if log_func:
@@ -280,13 +301,13 @@ def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives
         if len(extracted_files) == 1:
             src_file = extracted_files[0]
             src_ext = Path(src_file).suffix
-            new_name = f"{base_name}{src_ext}"
+            new_name = f"{archive_target}{src_ext}"
             dest_path = os.path.join(dest_dir, new_name)
 
             if os.path.exists(dest_path) and not force_overwrite:
                 if log_func:
-                    log_func(f"    跳过: {new_name} (目标已存在)")
-                return original_stem, None
+                    log_func(f"    跳过: {new_name} (目标已存在，建立映射)")
+                return original_stem, subfolder + '/' if subfolder else new_name
 
             shutil.copy2(src_file, dest_path)
             if log_func:
@@ -296,22 +317,23 @@ def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives
                     log_func(f"    -> {new_name}")
             return original_stem, (subfolder + '/' if subfolder else new_name)
 
-        subfolder_name = base_name
-        subfolder_path = os.path.join(dest_dir, subfolder_name)
+        # 多文件压缩包：解压后多个文件 → 放入子文件夹
+        inner_subfolder_name = archive_target
+        inner_subfolder_path = os.path.join(dest_dir, inner_subfolder_name)
         counter = 1
-        while os.path.exists(subfolder_path):
-            subfolder_name = f"{base_name}_{counter}"
-            subfolder_path = os.path.join(dest_dir, subfolder_name)
+        while os.path.exists(inner_subfolder_path):
+            inner_subfolder_name = f"{archive_target}_{counter}"
+            inner_subfolder_path = os.path.join(dest_dir, inner_subfolder_name)
             counter += 1
 
-        os.makedirs(subfolder_path, exist_ok=True)
+        os.makedirs(inner_subfolder_path, exist_ok=True)
         if log_func:
-            log_func(f"    创建子文件夹: {subfolder_name}/")
+            log_func(f"    创建子文件夹: {inner_subfolder_name}/")
 
         success_count = 0
         for src_file in extracted_files:
             original_name = Path(src_file).name
-            dest_path = os.path.join(subfolder_path, original_name)
+            dest_path = os.path.join(inner_subfolder_path, original_name)
 
             if os.path.exists(dest_path) and not force_overwrite:
                 if log_func:
@@ -329,13 +351,19 @@ def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives
         if success_count == 0:
             if log_func:
                 log_func(f"    所有文件都已跳过或覆盖失败")
-            return original_stem, None
+            # 映射仍要返回，因为子文件夹（内部解压名）已存在
+            rel = f"{subfolder}/{inner_subfolder_name}/" if subfolder else f"{inner_subfolder_name}/"
+            return original_stem, rel
 
-        rel = f"{subfolder}/{subfolder_name}/" if subfolder else f"{subfolder_name}/"
+        rel = f"{subfolder}/{inner_subfolder_name}/" if subfolder else f"{inner_subfolder_name}/"
         return original_stem, rel
 
 
-def batch_process_roms(source_dir, target_dir, force_overwrite=False, copy_archives_directly=False, group_map=None, log_func=None):
+def batch_process_roms(source_dir, target_dir, force_overwrite=False, copy_archives_directly=False, group_map=None, file_to_game=None, log_func=None):
+    """
+    批量处理ROM文件：支持用 file_to_game 把原始文件名映射到游戏名作为输出文件名。
+    目标文件已存在且非覆盖模式时，跳过复制但仍建立映射，支持「外部手动复制 + 脚本仅生成映射」。
+    """
     rom_mapping = {}
 
     source_path = Path(source_dir)
@@ -346,16 +374,23 @@ def batch_process_roms(source_dir, target_dir, force_overwrite=False, copy_archi
 
     os.makedirs(target_dir, exist_ok=True)
 
-    EXCLUDE_FILES = {'metadata.pegasus.txt'}
-    files = [f for f in source_path.iterdir() if f.is_file() and f.name.lower() not in EXCLUDE_FILES]
+    # 收集源文件：先扫描源目录顶层文件（排除 metadata.pegasus.txt），
+    # 再补充 group_map 中位于子文件夹内的文件（多文件分组场景）。
+    # 注意：顶层扫描与子文件夹补充需同时进行，不能因为存在 group_map 而跳过顶层扫描，
+    # 否则会漏掉那些「不属于任何多文件分组」的单文件游戏（如 001.chd、687.chd 等）。
+    files_set = set()
 
-    # 补充多文件分组中的文件（可能位于子文件夹内，未出现在顶层扫描结果中）
+    EXCLUDE_FILES = {'metadata.pegasus.txt'}
+    for f in source_path.iterdir():
+        if f.is_file() and f.name.lower() not in EXCLUDE_FILES:
+            files_set.add(os.path.normpath(str(f)))
+
     if group_map:
         for abs_src in sorted(group_map):
             if os.path.isfile(abs_src):
-                ap = Path(abs_src)
-                if ap not in files:
-                    files.append(ap)
+                files_set.add(os.path.normpath(abs_src))
+
+    files = [Path(p) for p in files_set]
 
     if not files:
         if log_func:
@@ -367,7 +402,7 @@ def batch_process_roms(source_dir, target_dir, force_overwrite=False, copy_archi
         if force_overwrite:
             log_func(f"模式: 强制覆盖已存在的文件")
         else:
-            log_func(f"模式: 跳过已存在的文件")
+            log_func(f"模式: 跳过已存在的文件（已存在仍建立映射）")
         if copy_archives_directly:
             log_func(f"压缩文件处理: 直接复制（不解压）")
 
@@ -381,13 +416,20 @@ def batch_process_roms(source_dir, target_dir, force_overwrite=False, copy_archi
         try:
             src = os.path.normpath(str(file_path))
             subfolder = group_map.get(src) if group_map else None
+            original_stem = Path(file_path).stem
+            target_name = None
+            if file_to_game and original_stem in file_to_game:
+                target_name = file_to_game[original_stem]
             original_stem, actual_name = process_rom_file(
                 src, target_dir, force_overwrite=force_overwrite,
-                copy_archives_directly=copy_archives_directly, subfolder=subfolder, log_func=log_func)
+                copy_archives_directly=copy_archives_directly,
+                subfolder=subfolder, target_name=target_name, log_func=log_func)
             if actual_name is not None:
                 rom_mapping[original_stem] = actual_name
                 if subfolder and log_func:
                     log_func(f"  → 多文件分组，归入文件夹: {subfolder}/")
+                elif target_name and log_func:
+                    log_func(f"  → 重命名为游戏名: {target_name}")
                 success_count += 1
             else:
                 skip_count += 1
@@ -397,10 +439,66 @@ def batch_process_roms(source_dir, target_dir, force_overwrite=False, copy_archi
             fail_count += 1
 
     if log_func:
-        log_func(f"\nROM处理完成！成功: {success_count}, 跳过: {skip_count}, 失败: {fail_count}")
+        log_func(f"\nROM处理完成！成功: {success_count}, 跳过(仅建映射): {skip_count}, 失败: {fail_count}")
         log_func(f"映射表条目: {len(rom_mapping)}")
 
     return rom_mapping
+
+
+def build_mapping_from_games(games, target_dir, log_func=None):
+    """
+    不依赖任何复制操作，仅通过扫描 target_dir 下已存在的文件/文件夹，
+    结合 games 列表（游戏名、多文件分组信息）来建立文件名映射表。
+    用于 do_roms=False 时，根据已手动放置的文件生成映射。
+    """
+    mapping = {}
+    if not os.path.isdir(target_dir):
+        return mapping
+
+    try:
+        entries = list(os.listdir(target_dir))
+    except Exception as e:
+        if log_func:
+            log_func(f"    扫描输出目录失败: {str(e)}")
+        return mapping
+
+    # 预建：原始文件 stem → 目标名
+    for g in games:
+        game_name = g.get('game', '')
+        files = g.get('files', []) or ([g['file']] if g.get('file') else [])
+        for f in files:
+            if not f:
+                continue
+            original_stem = Path(f).stem
+            if len(files) > 1:
+                # 多文件：目标是子文件夹，且必须实际存在于输出目录
+                folder_name = _multi_file_folder_name(g)
+                if os.path.isdir(os.path.join(target_dir, folder_name)):
+                    mapping[original_stem] = folder_name + '/'
+                else:
+                    if log_func:
+                        log_func(f"    多文件目标文件夹不存在，跳过映射: {folder_name}/")
+            else:
+                # 单文件：尝试在 target_dir 下查找以 game_name 命名的文件（含任意扩展名）
+                matched = None
+                for entry in entries:
+                    entry_path = os.path.join(target_dir, entry)
+                    if os.path.isfile(entry_path) and os.path.splitext(entry)[0] == game_name:
+                        matched = entry
+                        break
+                    # 同时兼容「原文件名未改」的场景
+                    if os.path.isfile(entry_path) and os.path.splitext(entry)[0] == original_stem:
+                        matched = entry
+                        break
+                if matched:
+                    mapping[original_stem] = matched
+                else:
+                    # 允许占位：游戏名（无扩展名）供 resolve_file_path 兜底
+                    mapping[original_stem] = f'{game_name}'
+
+    if log_func:
+        log_func(f"    从游戏列表扫描到 {len(mapping)} 个映射条目")
+    return mapping
 
 
 def _get_asset_extension(asset_path, default='.png'):
@@ -583,7 +681,12 @@ def resolve_file_path(file_val, rom_mapping=None):
 
 
 def _multi_file_folder_name(game):
-    """多文件游戏归入同一文件夹：取各文件的公共父目录；若无公共目录则用游戏名。"""
+    """多文件游戏归入同一文件夹，文件夹名统一使用游戏名。
+    即使各文件原本位于公共父目录下，复制时/复制后也会改用游戏名。"""
+    folder = game.get('game', '')
+    if folder:
+        return folder
+    # 游戏名为空时退回公共父目录，避免生成空文件夹名
     files = game.get('files', []) or ([game['file']] if game.get('file') else [])
     dirs = set()
     for f in files:
@@ -594,7 +697,7 @@ def _multi_file_folder_name(game):
             dirs.add(d)
     if len(dirs) == 1:
         return next(iter(dirs))
-    return game.get('game', '')
+    return ''
 
 
 def _fill_game_elems(game_elem, game, assets, name_val, name_prefix):
@@ -867,19 +970,22 @@ def run_integrated_process(config, log_func=None):
                                              force_overwrite=force_overwrite,
                                              copy_archives_directly=copy_archives_directly,
                                              group_map=multi_group_map or None,
+                                             file_to_game=file_to_game,
                                              log_func=log_func)
         else:
             if log_func:
                 log_func(f"\n  --- 步骤1: 跳过ROM处理 ---")
 
         if do_gamelist:
+            # 若未处理ROM但存在输出文件（可能为外部手动复制/移动），
+            # 则基于 games 列表扫描目标目录建立映射（比通用扫描更准确）
             if not do_roms and rom_mapping == {}:
                 if log_func:
-                    log_func(f"\n  --- 补充: 从输出目录构建ROM映射 ---")
-                rom_mapping = build_mapping_from_output_dir(target_dir, log_func=log_func)
+                    log_func(f"\n  --- 补充: 从游戏列表+输出目录构建映射 (支持外部手动放置) ---")
+                rom_mapping = build_mapping_from_games(games, target_dir, log_func=log_func)
                 if not rom_mapping:
                     if log_func:
-                        log_func(f"    输出目录为空，无映射可用，将使用原始文件名")
+                        log_func(f"    输出目录为空或未匹配到文件，无映射可用，将使用原始文件名")
 
             if log_func:
                 log_func(f"\n  --- 步骤2: 生成 gamelist.xml (使用实际输出路径) ---")
