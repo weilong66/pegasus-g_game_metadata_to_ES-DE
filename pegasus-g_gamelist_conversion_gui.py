@@ -226,37 +226,42 @@ def collect_files_recursive(directory):
     return files
 
 
-def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives_directly=False, log_func=None):
+def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives_directly=False, subfolder=None, log_func=None):
     file_name = Path(file_path).name
     original_stem = Path(file_path).stem
 
+    dest_dir = target_dir
+    if subfolder:
+        dest_dir = os.path.join(target_dir, subfolder)
+        os.makedirs(dest_dir, exist_ok=True)
+
     if copy_archives_directly:
-        dest_path = os.path.join(target_dir, file_name)
+        dest_path = os.path.join(dest_dir, file_name)
         if os.path.exists(dest_path) and not force_overwrite:
             if log_func:
                 log_func(f"  跳过: {file_name} (目标已存在)")
-            return original_stem, None
+            return original_stem, subfolder + '/' if subfolder else None
         if os.path.exists(dest_path) and force_overwrite:
             if log_func:
                 log_func(f"  覆盖: {file_name}")
         shutil.copy2(file_path, dest_path)
         if log_func:
             log_func(f"  复制: {file_name}")
-        return original_stem, file_name
+        return original_stem, (subfolder + '/' if subfolder else file_name)
 
     if not is_archive(file_path):
-        dest_path = os.path.join(target_dir, file_name)
+        dest_path = os.path.join(dest_dir, file_name)
         if os.path.exists(dest_path) and not force_overwrite:
             if log_func:
                 log_func(f"  跳过: {file_name} (目标已存在)")
-            return original_stem, None
+            return original_stem, subfolder + '/' if subfolder else None
         if os.path.exists(dest_path) and force_overwrite:
             if log_func:
                 log_func(f"  覆盖: {file_name}")
         shutil.copy2(file_path, dest_path)
         if log_func:
             log_func(f"  复制: {file_name}")
-        return original_stem, file_name
+        return original_stem, (subfolder + '/' if subfolder else file_name)
 
     base_name = get_archive_base_name(file_path)
 
@@ -276,7 +281,7 @@ def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives
             src_file = extracted_files[0]
             src_ext = Path(src_file).suffix
             new_name = f"{base_name}{src_ext}"
-            dest_path = os.path.join(target_dir, new_name)
+            dest_path = os.path.join(dest_dir, new_name)
 
             if os.path.exists(dest_path) and not force_overwrite:
                 if log_func:
@@ -289,14 +294,14 @@ def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives
                     log_func(f"    覆盖: {new_name}")
                 else:
                     log_func(f"    -> {new_name}")
-            return original_stem, new_name
+            return original_stem, (subfolder + '/' if subfolder else new_name)
 
         subfolder_name = base_name
-        subfolder_path = os.path.join(target_dir, subfolder_name)
+        subfolder_path = os.path.join(dest_dir, subfolder_name)
         counter = 1
         while os.path.exists(subfolder_path):
             subfolder_name = f"{base_name}_{counter}"
-            subfolder_path = os.path.join(target_dir, subfolder_name)
+            subfolder_path = os.path.join(dest_dir, subfolder_name)
             counter += 1
 
         os.makedirs(subfolder_path, exist_ok=True)
@@ -326,10 +331,11 @@ def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives
                 log_func(f"    所有文件都已跳过或覆盖失败")
             return original_stem, None
 
-        return original_stem, subfolder_name + "/"
+        rel = f"{subfolder}/{subfolder_name}/" if subfolder else f"{subfolder_name}/"
+        return original_stem, rel
 
 
-def batch_process_roms(source_dir, target_dir, force_overwrite=False, copy_archives_directly=False, log_func=None):
+def batch_process_roms(source_dir, target_dir, force_overwrite=False, copy_archives_directly=False, group_map=None, log_func=None):
     rom_mapping = {}
 
     source_path = Path(source_dir)
@@ -342,6 +348,15 @@ def batch_process_roms(source_dir, target_dir, force_overwrite=False, copy_archi
 
     EXCLUDE_FILES = {'metadata.pegasus.txt'}
     files = [f for f in source_path.iterdir() if f.is_file() and f.name.lower() not in EXCLUDE_FILES]
+
+    # 补充多文件分组中的文件（可能位于子文件夹内，未出现在顶层扫描结果中）
+    if group_map:
+        for abs_src in sorted(group_map):
+            if os.path.isfile(abs_src):
+                ap = Path(abs_src)
+                if ap not in files:
+                    files.append(ap)
+
     if not files:
         if log_func:
             log_func(f"ROM源目录下没有文件（已排除 metadata.pegasus.txt）")
@@ -364,11 +379,15 @@ def batch_process_roms(source_dir, target_dir, force_overwrite=False, copy_archi
         if log_func:
             log_func(f"\n[{i}/{len(files)}] 处理ROM: {file_path.name}")
         try:
+            src = os.path.normpath(str(file_path))
+            subfolder = group_map.get(src) if group_map else None
             original_stem, actual_name = process_rom_file(
-                str(file_path), target_dir, force_overwrite=force_overwrite,
-                copy_archives_directly=copy_archives_directly, log_func=log_func)
+                src, target_dir, force_overwrite=force_overwrite,
+                copy_archives_directly=copy_archives_directly, subfolder=subfolder, log_func=log_func)
             if actual_name is not None:
                 rom_mapping[original_stem] = actual_name
+                if subfolder and log_func:
+                    log_func(f"  → 多文件分组，归入文件夹: {subfolder}/")
                 success_count += 1
             else:
                 skip_count += 1
@@ -563,6 +582,49 @@ def resolve_file_path(file_val, rom_mapping=None):
     return './' + file_val
 
 
+def _multi_file_folder_name(game):
+    """多文件游戏归入同一文件夹：取各文件的公共父目录；若无公共目录则用游戏名。"""
+    files = game.get('files', []) or ([game['file']] if game.get('file') else [])
+    dirs = set()
+    for f in files:
+        if not f:
+            continue
+        d = os.path.dirname(f).replace('\\', '/')
+        if d:
+            dirs.add(d)
+    if len(dirs) == 1:
+        return next(iter(dirs))
+    return game.get('game', '')
+
+
+def _fill_game_elems(game_elem, game, assets, name_val, name_prefix):
+    if name_prefix:
+        name_val = get_prefixed_name(name_val)
+    name_elem = ET.SubElement(game_elem, "name")
+    name_elem.text = name_val
+
+    desc_elem = ET.SubElement(game_elem, "desc")
+    desc_elem.text = game.get('description', '')
+
+    for key, val in (('thumbnail', assets['thumbnail']),
+                     ('video', assets['video']),
+                     ('screenshot', assets['screenshot']),
+                     ('image', assets['image']),
+                     ('marquee', assets['marquee'])):
+        e = ET.SubElement(game_elem, key)
+        e.text = val
+
+    players_elem = ET.SubElement(game_elem, "players")
+    players_elem.text = "1"
+
+    id_elem = ET.SubElement(game_elem, "id")
+    id_elem.text = str(uuid.uuid4())
+
+    scrap_elem = ET.SubElement(game_elem, "scrap")
+    scrap_elem.set('name', 'PegasusG')
+    scrap_elem.set('date', time.strftime('%Y%m%dT%H%M%S'))
+
+
 def create_gamelist_xml(games, output_path, name_prefix=True, rom_mapping=None):
     games_sorted = sorted(games, key=lambda g: g.get('sort-by', ''))
 
@@ -581,6 +643,16 @@ def create_gamelist_xml(games, output_path, name_prefix=True, rom_mapping=None):
 
         assets = _build_asset_paths(game)
 
+        if len(files) > 1:
+            # 多文件：多个文件复制到同一文件夹，path 指向该文件夹（而非具体文件）
+            folder_name = _multi_file_folder_name(game)
+            game_elem = ET.SubElement(root, "game")
+            path_elem = ET.SubElement(game_elem, "path")
+            path_elem.text = f'./{folder_name}/'
+            _fill_game_elems(game_elem, game, assets, game_name, name_prefix)
+            generated_count += 1
+            continue
+
         for file_val in files:
             game_elem = ET.SubElement(root, "game")
 
@@ -592,39 +664,8 @@ def create_gamelist_xml(games, output_path, name_prefix=True, rom_mapping=None):
                 name_val = os.path.splitext(os.path.basename(file_val))[0]
             else:
                 name_val = game_name
-            if name_prefix:
-                name_val = get_prefixed_name(name_val)
-            name_elem = ET.SubElement(game_elem, "name")
-            name_elem.text = name_val
 
-            desc_elem = ET.SubElement(game_elem, "desc")
-            desc_elem.text = game.get('description', '')
-
-            thumbnail_elem = ET.SubElement(game_elem, "thumbnail")
-            thumbnail_elem.text = assets['thumbnail']
-
-            video_elem = ET.SubElement(game_elem, "video")
-            video_elem.text = assets['video']
-
-            screenshot_elem = ET.SubElement(game_elem, "screenshot")
-            screenshot_elem.text = assets['screenshot']
-
-            image_elem = ET.SubElement(game_elem, "image")
-            image_elem.text = assets['image']
-
-            marquee_elem = ET.SubElement(game_elem, "marquee")
-            marquee_elem.text = assets['marquee']
-
-            players_elem = ET.SubElement(game_elem, "players")
-            players_elem.text = "1"
-
-            id_elem = ET.SubElement(game_elem, "id")
-            id_elem.text = str(uuid.uuid4())
-
-            scrap_elem = ET.SubElement(game_elem, "scrap")
-            scrap_elem.set('name', 'PegasusG')
-            scrap_elem.set('date', time.strftime('%Y%m%dT%H%M%S'))
-
+            _fill_game_elems(game_elem, game, assets, name_val, name_prefix)
             generated_count += 1
 
     rough_str = ET.tostring(root, encoding='utf-8', method='xml')
@@ -806,9 +847,26 @@ def run_integrated_process(config, log_func=None):
             if log_func:
                 log_func(f"\n  --- 步骤1: 处理ROM文件 (建立文件名映射) ---")
             rom_source_dir = os.path.join(rom_dir, folder_name) if os.path.isdir(os.path.join(rom_dir, folder_name)) else rom_dir
+
+            # 多文件游戏：同一个 game 块的多个文件归入同一文件夹
+            multi_group_map = {}
+            for g in games:
+                fv_list = g.get('files', []) or ([g['file']] if g.get('file') else [])
+                if len(fv_list) > 1:
+                    folder = _multi_file_folder_name(g)
+                    for fv in fv_list:
+                        if not fv:
+                            continue
+                        abs_fv = fv if os.path.isabs(fv) else os.path.join(rom_source_dir, fv.replace('/', os.sep))
+                        multi_group_map[os.path.normpath(abs_fv)] = folder
+            if multi_group_map:
+                if log_func:
+                    log_func(f"  多文件分组: 共 {len(multi_group_map)} 个文件将归入统一文件夹")
+
             rom_mapping = batch_process_roms(rom_source_dir, target_dir,
                                              force_overwrite=force_overwrite,
                                              copy_archives_directly=copy_archives_directly,
+                                             group_map=multi_group_map or None,
                                              log_func=log_func)
         else:
             if log_func:

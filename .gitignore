@@ -5,6 +5,7 @@ bin-release/
 [Bb]in/
 public/**
 __pycache__/
+/*test*/
 
 # Other files and folders
 .settings/
