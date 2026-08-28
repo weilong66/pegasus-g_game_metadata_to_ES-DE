@@ -32,6 +32,7 @@
 import os
 import sys
 import argparse
+import zipfile
 
 # 让脚本能 import 同目录下的主脚本
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -74,6 +75,17 @@ def make_video(path, text=''):
     with open(path, 'wb') as f:
         # 写入一个最小可辨识的 ftyp 头 + 填充，便于媒体复制测试
         f.write(b'\x00\x00\x00\x18ftypmp42' + b'\x00' * 128)
+    return path
+
+
+def make_zip(path, inner_name, text=''):
+    """
+    生成一个真实的 ZIP 文件，内部存放一个非 zip 格式的文件，
+    用于真实测试主脚本的压缩包解压/复制逻辑。
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(inner_name, (text or f'zip content: {inner_name}').encode('utf-8'))
     return path
 
 
@@ -194,8 +206,15 @@ def generate_fixture(source_dir):
             if isinstance(files, str):
                 files = [files]
             for f in files:
-                # 放在本游戏文件夹内，与 metadata 同级 —— 主脚本会排除 metadata 处理它
-                make_video(os.path.join(folder, f), text=f)
+                fpath = os.path.join(folder, f)
+                # 若是压缩包(.zip)，先构造一个其它格式的文件再压缩成真实 ZIP，
+                # 以真实测试主脚本的解压/复制功能
+                if os.path.splitext(f)[1].lower() == '.zip':
+                    inner_stem = os.path.splitext(os.path.basename(f))[0]
+                    make_zip(fpath, f'{inner_stem}.gba', text=f)
+                else:
+                    # 放文件时若无父目录则交给 make_video 自动创建
+                    make_video(fpath, text=f)
 
             # media 文件：优先使用显式 media 映射，否则按文件名生成默认资源
             media = game.get('media')
