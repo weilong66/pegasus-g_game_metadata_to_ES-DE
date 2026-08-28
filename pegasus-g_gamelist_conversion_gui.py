@@ -573,7 +573,7 @@ def find_metadata_files(source_dir, recursive=True):
     return results
 
 
-def process_media_folder(media_dir, output_base, file_to_game, force_overwrite=False, log_func=None):
+def process_media_folder(media_dir, output_base, file_to_game, force_overwrite=False, log_func=None, skip_missing=False, base_dir=None):
     assets_dir = os.path.join(output_base, 'assets')
     covers_dir = os.path.join(assets_dir, 'covers')
     marquees_dir = os.path.join(assets_dir, 'marquees')
@@ -587,12 +587,29 @@ def process_media_folder(media_dir, output_base, file_to_game, force_overwrite=F
     if not os.path.isdir(media_dir):
         return counts
 
+    # 如果启用了跳过缺失文件，预扫描输出目录中已存在的游戏名（去扩展名）
+    existing_games = set()
+    if skip_missing and base_dir and os.path.isdir(base_dir):
+        for f in os.listdir(base_dir):
+            full_path = os.path.join(base_dir, f)
+            if os.path.isfile(full_path):
+                stem, _ = os.path.splitext(f)
+                existing_games.add(stem)
+            elif os.path.isdir(full_path):
+                existing_games.add(f)
+
     for item in os.listdir(media_dir):
         item_path = os.path.join(media_dir, item)
         if not os.path.isdir(item_path):
             continue
         subfolder_name = item
         target_name = file_to_game.get(subfolder_name, subfolder_name)
+
+        # 跳过不存在的ROM文件对应的媒体
+        if skip_missing and base_dir and target_name not in existing_games:
+            if log_func:
+                log_func(f"  跳过: {subfolder_name} -> {target_name} (ROM文件不存在)")
+            continue
         if log_func:
             log_func(f"  处理媒体子文件夹: {subfolder_name} -> {target_name}")
 
@@ -771,11 +788,12 @@ def _fill_game_elems(game_elem, game, assets, name_val, name_prefix):
     scrap_elem.set('date', time.strftime('%Y%m%dT%H%M%S'))
 
 
-def create_gamelist_xml(games, output_path, name_prefix=True, rom_mapping=None):
+def create_gamelist_xml(games, output_path, name_prefix=True, rom_mapping=None, skip_missing=False, base_dir=None):
     games_sorted = sorted(games, key=lambda g: g.get('sort-by', ''))
 
     root = ET.Element("gameList")
     generated_count = 0
+    skipped_count = 0
 
     for game in games_sorted:
         game_name = game.get('game', '')
@@ -792,6 +810,11 @@ def create_gamelist_xml(games, output_path, name_prefix=True, rom_mapping=None):
         if len(files) > 1:
             # 多文件：多个文件复制到同一文件夹，path 指向该文件夹（而非具体文件）
             folder_name = _multi_file_folder_name(game)
+            if skip_missing and base_dir:
+                full_path = os.path.join(base_dir, folder_name)
+                if not os.path.isdir(full_path):
+                    skipped_count += 1
+                    continue
             game_elem = ET.SubElement(root, "game")
             path_elem = ET.SubElement(game_elem, "path")
             path_elem.text = f'./{folder_name}/'
@@ -800,6 +823,13 @@ def create_gamelist_xml(games, output_path, name_prefix=True, rom_mapping=None):
             continue
 
         for file_val in files:
+            if skip_missing and base_dir:
+                resolved_path = resolve_file_path(file_val, rom_mapping)
+                full_path = os.path.join(base_dir, resolved_path[2:] if resolved_path.startswith('./') else resolved_path)
+                if not os.path.isfile(full_path):
+                    skipped_count += 1
+                    continue
+
             game_elem = ET.SubElement(root, "game")
 
             resolved_path = resolve_file_path(file_val, rom_mapping)
@@ -825,7 +855,7 @@ def create_gamelist_xml(games, output_path, name_prefix=True, rom_mapping=None):
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(xml_str)
 
-    return generated_count
+    return generated_count, skipped_count
 
 
 def verify_gamelist_paths(gamelist_path, base_dir, log_func=None):
@@ -1033,10 +1063,15 @@ def run_integrated_process(config, log_func=None):
             if log_func:
                 log_func(f"\n  --- 步骤2: 生成 gamelist.xml (使用实际输出路径) ---")
 
-            generated = create_gamelist_xml(games, os.path.join(target_dir, 'gamelist.xml'),
-                                            name_prefix=add_prefix, rom_mapping=rom_mapping)
+            generated, skipped = create_gamelist_xml(games, os.path.join(target_dir, 'gamelist.xml'),
+                                            name_prefix=add_prefix, rom_mapping=rom_mapping,
+                                            skip_missing=config.get('skip_missing_roms', False),
+                                            base_dir=target_dir)
             if log_func:
-                log_func(f"  ✓ 已生成 gamelist.xml ({generated} 个游戏元素)")
+                msg = f"  ✓ 已生成 gamelist.xml ({generated} 个游戏元素)"
+                if skipped > 0:
+                    msg += f"，跳过 {skipped} 个（文件不存在）"
+                log_func(msg)
             total_stats['games'] += generated
         else:
             if log_func:
@@ -1047,7 +1082,8 @@ def run_integrated_process(config, log_func=None):
             if os.path.isdir(media_dir):
                 if log_func:
                     log_func(f"\n  --- 步骤3: 处理媒体文件 ---")
-                counts = process_media_folder(media_dir, target_dir, file_to_game, force_overwrite=force_overwrite, log_func=log_func)
+                counts = process_media_folder(media_dir, target_dir, file_to_game, force_overwrite=force_overwrite, log_func=log_func,
+                    skip_missing=config.get('skip_missing_roms', False), base_dir=target_dir)
                 total_stats['covers'] += counts['covers']
                 total_stats['marquees'] += counts['marquees']
                 total_stats['videos'] += counts['videos']
@@ -1204,28 +1240,33 @@ class IntegratedProcessorApp:
 
         self.do_gamelist_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(options_frame, text="生成 gamelist.xml 文件",
-                        variable=self.do_gamelist_var, command=self._update_prefix_state).grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+                        variable=self.do_gamelist_var, command=self._update_gamelist_state).grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
 
         self.add_prefix_var = tk.BooleanVar(value=True)
         self.add_prefix_cb = ttk.Checkbutton(options_frame, text="  └ 为游戏名称添加拼音首字母前缀",
                         variable=self.add_prefix_var)
         self.add_prefix_cb.grid(row=3, column=0, sticky=tk.W, padx=25, pady=2)
-        self._update_prefix_state()
+
+        self.skip_missing_var = tk.BooleanVar(value=False)
+        self.skip_missing_cb = ttk.Checkbutton(options_frame, text="  └ 跳过不存在的ROM文件（不加入gamelist）",
+                        variable=self.skip_missing_var)
+        self.skip_missing_cb.grid(row=4, column=0, sticky=tk.W, padx=25, pady=2)
+        self._update_gamelist_state()
 
         self.force_overwrite_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(options_frame, text="强制覆盖已存在的文件",
-                        variable=self.force_overwrite_var).grid(row=4, column=0, sticky=tk.W, padx=5, pady=2)
+                        variable=self.force_overwrite_var).grid(row=5, column=0, sticky=tk.W, padx=5, pady=2)
 
         self.copy_archives_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(options_frame, text="直接复制压缩文件（不解压，保留原始压缩包）",
-                        variable=self.copy_archives_var).grid(row=5, column=0, sticky=tk.W, padx=5, pady=2)
+                        variable=self.copy_archives_var).grid(row=6, column=0, sticky=tk.W, padx=5, pady=2)
 
         self.do_screenshots_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(options_frame, text="从视频中提取截图 (需要ffmpeg)",
-                        variable=self.do_screenshots_var, command=self._update_screenshot_state).grid(row=6, column=0, sticky=tk.W, padx=5, pady=2)
+                        variable=self.do_screenshots_var, command=self._update_screenshot_state).grid(row=7, column=0, sticky=tk.W, padx=5, pady=2)
 
         self.screenshot_frame = ttk.Frame(options_frame)
-        self.screenshot_frame.grid(row=7, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
+        self.screenshot_frame.grid(row=8, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
 
         ttk.Label(self.screenshot_frame, text="截图时间点:").pack(side=tk.LEFT, padx=(0, 5))
         self.screenshot_value_var = tk.StringVar(value="1")
@@ -1249,7 +1290,7 @@ class IntegratedProcessorApp:
 
         self.smart_screenshot_var = tk.BooleanVar(value=True)
         self.smart_frame = ttk.Frame(options_frame)
-        self.smart_frame.grid(row=8, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
+        self.smart_frame.grid(row=9, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
         self.smart_screenshot_cb = ttk.Checkbutton(self.smart_frame, text="智能截图（检测纯色帧自动延后）",
                         variable=self.smart_screenshot_var)
         self.smart_screenshot_cb.pack(side=tk.LEFT)
@@ -1266,7 +1307,7 @@ class IntegratedProcessorApp:
 
         self._update_screenshot_state()
 
-        row_idx = 9
+        row_idx = 10
         if not HAS_SMART_SCREENSHOT:
             ttk.Label(options_frame, text="提示: 智能截图模块未找到，将使用基础截图",
                       foreground='orange').grid(row=row_idx, column=0, sticky=tk.W, padx=5, pady=2)
@@ -1349,11 +1390,13 @@ class IntegratedProcessorApp:
         except Exception as e:
             messagebox.showerror("错误", f"导出日志失败: {str(e)}")
 
-    def _update_prefix_state(self):
+    def _update_gamelist_state(self):
         if self.do_gamelist_var.get():
             self.add_prefix_cb.config(state=tk.NORMAL)
+            self.skip_missing_cb.config(state=tk.NORMAL)
         else:
             self.add_prefix_cb.config(state=tk.DISABLED)
+            self.skip_missing_cb.config(state=tk.DISABLED)
 
     def _update_screenshot_state(self):
         state = tk.NORMAL if self.do_screenshots_var.get() else tk.DISABLED
@@ -1382,6 +1425,7 @@ class IntegratedProcessorApp:
             'do_media': self.do_media_var.get(),
             'do_gamelist': self.do_gamelist_var.get(),
             'add_prefix': self.add_prefix_var.get(),
+            'skip_missing_roms': self.skip_missing_var.get(),
             'force_overwrite': self.force_overwrite_var.get(),
             'copy_archives_directly': self.copy_archives_var.get(),
             'do_screenshots': self.do_screenshots_var.get(),
@@ -1419,6 +1463,7 @@ class IntegratedProcessorApp:
             self.do_media_var.set(config.get('do_media', True))
             self.do_gamelist_var.set(config.get('do_gamelist', True))
             self.add_prefix_var.set(config.get('add_prefix', True))
+            self.skip_missing_var.set(config.get('skip_missing_roms', False))
             self.force_overwrite_var.set(config.get('force_overwrite', False))
             self.copy_archives_var.set(config.get('copy_archives_directly', False))
             self.do_screenshots_var.set(config.get('do_screenshots', False))
@@ -1430,7 +1475,7 @@ class IntegratedProcessorApp:
             self.ffmpeg_path_var.set(config.get('ffmpeg_path', 'ffmpeg'))
             self.no_subfolder_var.set(config.get('no_subfolder', False))
             self.recursive_var.set(config.get('recursive', True))
-            self._update_prefix_state()
+            self._update_gamelist_state()
             self._update_screenshot_state()
             self._log(f"配置已加载: {CONFIG_FILE}")
         except Exception as e:

@@ -10,12 +10,13 @@
 
 | 文件 | 说明 |
 |------|------|
-| [pegasus-g_gamelist_processor_gui.py](#主脚本pegasus-g_gamelist_processor_guipy) | 转换主处理脚本（一体化GUI） |
+| [pegasus-g_gamelist_conversion_gui.py](#主脚本pegasus-g_gamelist_conversion_guipy) | 转换主处理脚本（一体化GUI） |
 | [smart_screenshot.py](#智能截图模块smart_screenshotpy) | 智能截图模块（检测纯色帧自动延后） |
+| [test_generate.py](#测试脚本test_generatepy) | 测试夹具生成与自动运行脚本 |
 
 ---
 
-## 主脚本：pegasus-g_gamelist_processor_gui.py
+## 主脚本：pegasus-g_gamelist_conversion_gui.py
 
 采用 **Correct by Construction**（正确构建）架构，从根源上保证 `gamelist.xml` 中的路径与实际文件完全一致。
 
@@ -32,7 +33,6 @@
 - **一键完整处理**：配置好源目录后，自动完成所有步骤
 - **单独处理**：步骤1-4可以单独执行。
   - 注意：如果未执行步骤1处理ROM文件，当单独执行步骤2生成gamelist.xml文件时，会使用输出目录下的文件建立文件名映射表；如果输出目录也没有ROM文件，则会直接使用原始文件名称+后缀。
-
 - **路径一致性保证**：ROM处理后记录实际输出名，生成 gamelist.xml 时直接使用正确路径
 - **智能默认值**：
   - ROM目录留空 → 自动使用源目录
@@ -41,6 +41,7 @@
 - **拼音前缀**：自动为游戏名称添加拼音首字母前缀，以便可以正常按字母分组
 - **媒体分类**：covers/marquees/videos 自动分类
 - **智能截图**：从视频文件中截图作为游戏截图放入screenshots文件夹中，截图时支持智能检测黑屏/白屏/绿屏等纯色帧，自动延后截取正常画面
+- **跳过不存在的ROM文件**：勾选后，gamelist.xml 生成和媒体文件处理均会跳过输出目录中不存在的ROM文件。同时支持重命名：输出目录中已有的原名文件（如 `049.chd`）会自动重命名为游戏名（如 `梦精灵 入梦.chd`），无需重复复制。
 - **配置保存/加载**：GUI 设置可保存到配置文件 `pegasus_conversion_gui_config.json` 中。
 - **日志导出**：支持导出日志
 
@@ -54,7 +55,7 @@
 | 递归搜索子目录 | 在源目录下递归查找 `metadata.pegasus.txt`，以便能够批量处理多个游戏平台的ROM文件。 |
 | ROM目录 | 用于单独设置存放ROM压缩包/文件的目录（留空使用源目录） |
 | 输出目录 | 处理结果输出位置（留空输出到源目录/output） |
-| 直接输出到目标目录 | 勾选后不创建与源目录同名的子文件夹，而是直接输出到“输出目录”下。 |
+| 直接输出到目标目录 | 勾选后不创建与源目录同名的子文件夹，而是直接输出到"输出目录"下。 |
 
 #### 处理选项
 
@@ -64,6 +65,7 @@
 | 处理媒体文件 | 分类处理 covers/marquees/videos |
 | 生成 gamelist.xml | 勾选时才生成该文件 |
 | └ 为游戏名称添加拼音首字母前缀 | 依赖上方选项，为游戏名添加拼音前缀 |
+| └ 跳过不存在的ROM文件（不加入gamelist） | 依赖上方选项，勾选后 gamelist.xml 和媒体处理均跳过缺失的ROM |
 | 强制覆盖已存在的文件 | 覆盖模式开关，未勾选时所有重名文件直接跳过 |
 | 直接复制压缩文件 | 不解压，保留原始压缩包格式 |
 | 从视频中提取截图 | 开启通过游戏视频提取游戏截图功能 |
@@ -90,7 +92,7 @@ pip install pypinyin Pillow rarfile py7zr
 ### 使用
 
 ```bash
-python pegasus-g_gamelist_processor_gui.py
+python pegasus-g_gamelist_conversion_gui.py
 ```
 
 ### 输出目录结构
@@ -126,7 +128,7 @@ output/
 
 ### 配置文件
 
-GUI 设置可以保存到 `pegasus_gamelist_processor_config.json`，下次启动自动加载。
+GUI 设置可以保存到 `pegasus_conversion_gui_config.json`，下次启动自动加载。
 
 ---
 
@@ -154,6 +156,40 @@ max_ratio = max_count / total_pixels
 if max_ratio >= 0.8:  # 80%阈值
     # 识别颜色类型并延后
 ```
+
+---
+
+## 测试脚本：test_generate.py
+
+用于生成模拟 Pegasus-G 源目录结构的测试夹具，并可选择自动运行转换流程进行验证。
+
+### 生成结构
+
+```
+source_dir/
+├── game_单文件/             # 单文件 ROM + 自动生成 media
+├── game_单文件压缩包/       # 单文件 ZIP 压缩包 + media
+├── game_多文件/             # 多文件 ROM（一个 game 块多个 files）
+├── game_单文件无媒体/       # 单文件 ROM，无 media
+└── game_多文件放同一子文件夹/ # 文件在数字子文件夹下
+```
+
+### 用法
+
+```bash
+# 仅生成测试夹具
+python test_generate.py
+
+# 生成后自动运行转换流程
+python test_generate.py --run
+
+# 指定自定义目录
+python test_generate.py --source ./my_source --output ./my_output
+```
+
+### 依赖
+
+- 可选 `Pillow`：安装后生成真实图片文件；否则生成最小占位字节
 
 ---
 
