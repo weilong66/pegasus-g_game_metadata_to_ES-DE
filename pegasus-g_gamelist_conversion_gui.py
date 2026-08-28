@@ -605,6 +605,17 @@ def process_media_folder(media_dir, output_base, file_to_game, force_overwrite=F
 
             if name_lower == 'boxfront':
                 dest_path = os.path.join(covers_dir, f"{target_name}{UNIFIED_IMAGE_EXT}")
+
+                # 如果文件以原名存在于输出目录但未以游戏名存在，则直接重命名（不复制）
+                if subfolder_name != target_name:
+                    orig_path = os.path.join(covers_dir, f"{subfolder_name}{UNIFIED_IMAGE_EXT}")
+                    if os.path.exists(orig_path) and not os.path.exists(dest_path):
+                        os.rename(orig_path, dest_path)
+                        if log_func:
+                            log_func(f"    重命名: {subfolder_name}{UNIFIED_IMAGE_EXT} -> {target_name}{UNIFIED_IMAGE_EXT}")
+                        counts['covers'] += 1
+                        continue
+
                 if force_overwrite:
                     if log_func:
                         log_func(f"    覆盖: {dest_path}")
@@ -621,6 +632,17 @@ def process_media_folder(media_dir, output_base, file_to_game, force_overwrite=F
 
             elif name_lower == 'logo':
                 dest_path = os.path.join(marquees_dir, f"{target_name}{UNIFIED_IMAGE_EXT}")
+
+                # 如果文件以原名存在于输出目录但未以游戏名存在，则直接重命名（不复制）
+                if subfolder_name != target_name:
+                    orig_path = os.path.join(marquees_dir, f"{subfolder_name}{UNIFIED_IMAGE_EXT}")
+                    if os.path.exists(orig_path) and not os.path.exists(dest_path):
+                        os.rename(orig_path, dest_path)
+                        if log_func:
+                            log_func(f"    重命名: {subfolder_name}{UNIFIED_IMAGE_EXT} -> {target_name}{UNIFIED_IMAGE_EXT}")
+                        counts['marquees'] += 1
+                        continue
+
                 if force_overwrite:
                     if log_func:
                         log_func(f"    覆盖: {dest_path}")
@@ -637,6 +659,17 @@ def process_media_folder(media_dir, output_base, file_to_game, force_overwrite=F
 
             elif name_lower == 'video':
                 dest_path = os.path.join(videos_dir, f"{target_name}{ext}")
+
+                # 如果文件以原名存在于输出目录但未以游戏名存在，则直接重命名（不复制）
+                if subfolder_name != target_name:
+                    orig_path = os.path.join(videos_dir, f"{subfolder_name}{ext}")
+                    if os.path.exists(orig_path) and not os.path.exists(dest_path):
+                        os.rename(orig_path, dest_path)
+                        if log_func:
+                            log_func(f"    重命名: {subfolder_name}{ext} -> {target_name}{ext}")
+                        counts['videos'] += 1
+                        continue
+
                 if force_overwrite:
                     if log_func:
                         log_func(f"    覆盖: {dest_path}")
