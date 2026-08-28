@@ -270,6 +270,16 @@ def process_rom_file(file_path, target_dir, force_overwrite=False, copy_archives
 
     if not is_archive(file_path):
         dest_path = os.path.join(dest_dir, effective_target_name)
+
+        # 如果文件以原名存在于输出目录但未以游戏名存在，则直接重命名（不复制）
+        if not subfolder and not copy_archives_directly and target_name:
+            orig_path = os.path.join(dest_dir, file_name)
+            if os.path.exists(orig_path) and not os.path.exists(dest_path):
+                os.rename(orig_path, dest_path)
+                if log_func:
+                    log_func(f"  重命名: {file_name} -> {effective_target_name}")
+                return original_stem, effective_target_name
+
         if os.path.exists(dest_path) and not force_overwrite:
             if log_func:
                 log_func(f"  跳过: {effective_target_name} (目标已存在，建立映射)")
