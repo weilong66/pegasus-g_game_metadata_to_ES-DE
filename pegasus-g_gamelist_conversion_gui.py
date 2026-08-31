@@ -817,7 +817,7 @@ def create_gamelist_xml(games, output_path, name_prefix=True, rom_mapping=None, 
                     continue
             game_elem = ET.SubElement(root, "game")
             path_elem = ET.SubElement(game_elem, "path")
-            path_elem.text = f'./{folder_name}/'
+            path_elem.text = f'./{folder_name}'
             _fill_game_elems(game_elem, game, assets, game_name, name_prefix)
             generated_count += 1
             continue
