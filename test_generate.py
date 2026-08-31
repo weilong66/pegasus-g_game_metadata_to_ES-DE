@@ -3,31 +3,6 @@
 测试脚本：生成一个模拟 Pegasus-G 源目录结构的测试夹具，
 用于测试 pegasus-g_gamelist_conversion_gui.py 的完整处理流程。
 
-生成的结构：
-来源目录(sourcr_dir)
-├─ game_单文件/             (单文件 bin，自动生成 media)
-│  ├─ metadata.pegasus.txt
-│  ├─ 单文件测试.bin
-│  └─ media/单文件测试/{boxfront.jpg,logo.jpg,video.mp4}
-├─ game_单文件压缩包/       (单文件 zip，含 media)
-│  ├─ metadata.pegasus.txt
-│  ├─ 单文件压缩包测试.zip
-│  └─ media/单文件压缩包测试/{boxfront.jpg,logo.jpg,video.mp4}
-├─ game_多文件/             (一个 game 块下多个 files，显式 assets.*)
-│  ├─ metadata.pegasus.txt
-│  ├─ 多文件测试1.zip / 多文件测试2.zip / 多文件测试3.zip
-│  └─ media/多文件测试/{boxFront.png,logo.png,video.mp4}
-├─ game_单文件无媒体/       (单文件 7z，无 media)
-│  ├─ metadata.pegasus.txt
-│  └─ 单文件无媒体测试.7z
-└─ sega_saturn/             (文件在数字子文件夹下，显式 assets.*)
-   ├─ metadata.pegasus.txt
-   ├─ 009/{Lunar 2 Eternal Blue (Japan).m3u, (DISC 1).chd, (DISC 2).chd}
-   └─ media/009/{boxFront.png,logo.png,video.mp4}
-
-用法：
-    python test_generate_fixture.py                       # 仅生成夹具
-    python test_generate_fixture.py --run                 # 生成后运行转换流程
 """
 import os
 import sys

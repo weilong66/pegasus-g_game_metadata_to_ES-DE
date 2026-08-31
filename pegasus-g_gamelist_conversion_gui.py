@@ -1213,7 +1213,7 @@ class IntegratedProcessorApp:
 
         self.recursive_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(dirs_frame, text="递归搜索子目录", variable=self.recursive_var).grid(
-            row=0, column=3, padx=10, pady=3, sticky=tk.W)
+            row=0, column=3, padx=0, pady=3, sticky=tk.W)
 
         ttk.Label(dirs_frame, text="ROM目录:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=3)
         self.rom_dir_var = tk.StringVar()
@@ -1222,7 +1222,7 @@ class IntegratedProcessorApp:
         ttk.Button(dirs_frame, text="浏览...", command=self._browse_rom).grid(
             row=1, column=2, padx=5, pady=3)
         ttk.Label(dirs_frame, text="(留空使用源目录)",
-                  foreground='gray').grid(row=1, column=3, padx=10, pady=3, sticky=tk.W)
+                  foreground='gray').grid(row=1, column=3, padx=0, pady=3, sticky=tk.W)
 
         ttk.Label(dirs_frame, text="输出目录:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=3)
         self.output_dir_var = tk.StringVar()
@@ -1231,10 +1231,10 @@ class IntegratedProcessorApp:
         ttk.Button(dirs_frame, text="浏览...", command=self._browse_output).grid(
             row=2, column=2, padx=5, pady=3)
         ttk.Label(dirs_frame, text="(留空输出到源目录/output)",
-                  foreground='gray').grid(row=2, column=3, padx=10, pady=3, sticky=tk.W)
+                  foreground='gray').grid(row=2, column=3, padx=0, pady=3, sticky=tk.W)
 
         self.no_subfolder_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(dirs_frame, text="直接输出到目标目录 (不创建同名子文件夹)",
+        ttk.Checkbutton(dirs_frame, text="直接输出到目标目录 (不放入源目录同名文件夹中)",
                         variable=self.no_subfolder_var).grid(row=3, column=0, columnspan=4, sticky=tk.W, padx=5, pady=2)
 
         dirs_frame.columnconfigure(1, weight=1)
