@@ -1017,6 +1017,18 @@ def run_integrated_process(config, log_func=None):
                 if f:
                     file_base = os.path.splitext(os.path.basename(f))[0]
                     file_to_game[file_base] = game_name
+            # 多文件分组：添加文件夹名→游戏名的映射，用于媒体处理
+            fv_list = g.get('files', []) or ([g['file']] if g.get('file') else [])
+            if len(fv_list) > 1:
+                folder_name = _multi_file_folder_name(g)
+                file_to_game[folder_name] = game_name
+                # 从文件路径提取子文件夹名（如 013/D_CD1.chd → 013），
+                # 映射到游戏名，确保媒体子文件夹能被正确识别
+                for fv in fv_list:
+                    if fv:
+                        parent = os.path.dirname(fv.replace('/', os.sep))
+                        if parent:
+                            file_to_game[parent] = game_name
 
         rom_mapping = {}
         if do_roms and rom_dir and os.path.isdir(rom_dir):
