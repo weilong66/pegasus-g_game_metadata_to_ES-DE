@@ -1122,7 +1122,7 @@ def run_integrated_process(config, log_func=None):
                             video_path = os.path.join(subfolder_path, fname)
                             if not os.path.isfile(video_path):
                                 continue
-                            out_img = os.path.join(screenshots_dir, f"{target_name}.png")
+                            out_img = os.path.join(screenshots_dir, f"{target_name}.jpg")
                             if smart_screenshot and HAS_SMART_SCREENSHOT:
                                 if extract_video_frame_with_fallback(
                                     video_path, out_img, frame_time_sec,
@@ -1234,7 +1234,7 @@ class IntegratedProcessorApp:
                   foreground='gray').grid(row=2, column=3, padx=0, pady=3, sticky=tk.W)
 
         self.no_subfolder_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(dirs_frame, text="直接输出到目标目录 (不放入源目录同名文件夹中)",
+        ttk.Checkbutton(dirs_frame, text="直接输出到目标目录 (所有文件会输出到一个文件夹中)",
                         variable=self.no_subfolder_var).grid(row=3, column=0, columnspan=4, sticky=tk.W, padx=5, pady=2)
 
         dirs_frame.columnconfigure(1, weight=1)
