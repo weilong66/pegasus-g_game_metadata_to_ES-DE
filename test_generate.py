@@ -24,6 +24,20 @@ try:
 except ImportError:
     HAS_PIL = False
 
+# 试导入 OpenCV 或 imageio 用于生成真实视频；失败则写入最小占位
+try:
+    import cv2
+    import numpy as np
+    HAS_OPENCV = True
+except ImportError:
+    HAS_OPENCV = False
+
+try:
+    import imageio
+    HAS_IMAGEIO = True
+except ImportError:
+    HAS_IMAGEIO = False
+
 
 def make_image(path, width=64, height=64, color=None, fmt='PNG'):
     """生成一张纯色小图，返回真图片文件；无 PIL 时写入最小字节。"""
@@ -44,11 +58,81 @@ def make_image(path, width=64, height=64, color=None, fmt='PNG'):
     return path
 
 
-def make_video(path, text=''):
-    """模拟视频文件（仅占位，媒体处理会原样复制；截图需真实ffmpeg）。"""
+def make_rom_file(path, text=''):
+    """生成ROM占位文件（简单二进制内容，仅供复制测试）。"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    content = (text or 'rom content').encode('utf-8')
     with open(path, 'wb') as f:
-        # 写入一个最小可辨识的 ftyp 头 + 填充，便于媒体复制测试
+        f.write(content + b'\x00' * (1024 - len(content)))
+
+
+def make_video(path, text=''):
+    """生成一段真实视频（含动态纹理背景），用于测试截图和智能截图功能。
+    纹理背景确保颜色分散到多个量化桶，不会被 is_solid_color_frame 误判。
+    优先使用 OpenCV（cv2），其次 imageio，最后写入最小占位字节。
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    if HAS_OPENCV:
+        w, h, fps, duration = 320, 240, 15, 8
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        writer = cv2.VideoWriter(path, fourcc, fps, (w, h))
+        grid_size = 16
+        for t in range(fps * duration):
+            frame = np.zeros((h, w, 3), dtype=np.uint8)
+            phase = t / (fps * duration)
+            # 纹理背景：每个网格块颜色不同（正弦函数，随时间变化）
+            for y in range(0, h, grid_size):
+                for x in range(0, w, grid_size):
+                    r = int(128 + 127 * np.sin(x * 0.1 + y * 0.05 + phase * 4 * np.pi))
+                    g = int(128 + 127 * np.cos(x * 0.05 + y * 0.1 + phase * 4 * np.pi + 1))
+                    b = int(128 + 127 * np.sin(x * 0.08 + y * 0.08 + phase * 4 * np.pi + 2))
+                    frame[y:y+grid_size, x:x+grid_size] = (b, g, r)
+            # 画一个移动的白色方块，模拟动态物体
+            rect_size = 40
+            x = int((w - rect_size) * (t / (fps * duration)))
+            y = int((h - rect_size) * abs((t / (fps * duration)) * 2 - 1))
+            cv2.rectangle(frame, (x, y), (x + rect_size, y + rect_size), (255, 255, 255), -1)
+            # 画一个移动的圆圈
+            cx = int(w * (0.5 + 0.3 * np.sin(2 * np.pi * t / fps)))
+            cy = int(h * (0.5 + 0.3 * np.cos(2 * np.pi * t / fps)))
+            cv2.circle(frame, (cx, cy), 25, (0, 255, 255), -1)
+            writer.write(frame)
+        writer.release()
+        return path
+
+    if HAS_IMAGEIO:
+        w, h, fps, duration = 320, 240, 15, 8
+        writer = imageio.get_writer(path, fps=fps, codec='libx264', quality=8)
+        grid_size = 16
+        for t in range(fps * duration):
+            frame = np.zeros((h, w, 3), dtype=np.uint8)
+            phase = t / (fps * duration)
+            for y in range(0, h, grid_size):
+                for x in range(0, w, grid_size):
+                    r = int(128 + 127 * np.sin(x * 0.1 + y * 0.05 + phase * 4 * np.pi))
+                    g = int(128 + 127 * np.cos(x * 0.05 + y * 0.1 + phase * 4 * np.pi + 1))
+                    b = int(128 + 127 * np.sin(x * 0.08 + y * 0.08 + phase * 4 * np.pi + 2))
+                    frame[y:y+grid_size, x:x+grid_size] = (b, g, r)
+            rect_size = 40
+            x = int((w - rect_size) * (t / (fps * duration)))
+            y = int((h - rect_size) * abs((t / (fps * duration)) * 2 - 1))
+            frame[y:y+rect_size, x:x+rect_size] = (255, 255, 255)
+            cx = int(w * (0.5 + 0.3 * np.sin(2 * np.pi * t / fps)))
+            cy = int(h * (0.5 + 0.3 * np.cos(2 * np.pi * t / fps)))
+            r2 = 25
+            for dy in range(-r2, r2):
+                for dx in range(-r2, r2):
+                    if dx*dx + dy*dy <= r2*r2:
+                        py, px = cy + dy, cx + dx
+                        if 0 <= py < h and 0 <= px < w:
+                            frame[py, px] = (0, 255, 255)
+            writer.append_data(frame)
+        writer.close()
+        return path
+
+    # 无可用视频库：写入最小占位字节
+    with open(path, 'wb') as f:
         f.write(b'\x00\x00\x00\x18ftypmp42' + b'\x00' * 128)
     return path
 
@@ -188,8 +272,8 @@ def generate_fixture(source_dir):
                     inner_stem = os.path.splitext(os.path.basename(f))[0]
                     make_zip(fpath, f'{inner_stem}.gba', text=f)
                 else:
-                    # 放文件时若无父目录则交给 make_video 自动创建
-                    make_video(fpath, text=f)
+                    # 放文件时若无父目录则交给 make_rom_file 自动创建
+                    make_rom_file(fpath, text=f)
 
             # media 文件：优先使用显式 media 映射，否则按文件名生成默认资源
             media = game.get('media')
@@ -237,7 +321,7 @@ def run_conversion(source_dir, output_dir):
         'add_prefix': True,
         'force_overwrite': True,
         'copy_archives_directly': False,
-        'do_screenshots': False,  # 占位视频无真实ffmpeg帧，关闭截图避免失败噪音
+        'do_screenshots': True,   # 真实视频可正常截图
         'smart_screenshot': True,
         'no_subfolder': False,
         'recursive': True,
